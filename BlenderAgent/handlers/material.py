@@ -44,9 +44,10 @@ def material_create(body: dict[str, Any]) -> dict[str, Any]:
 def material_delete(body: dict[str, Any]) -> dict[str, Any]:
     import bpy  # type: ignore
     mat = get_material(body.get("materialName") or body.get("name"))
-    with composite_undo(f"material_delete:{mat.name}"):
+    name = mat.name
+    with composite_undo(f"material_delete:{name}"):
         bpy.data.materials.remove(mat)
-    return {"ok": True, "data": {"deleted": mat.name}}
+    return {"ok": True, "data": {"deleted": name}}
 
 
 @handler("POST", "/material/assign_to_object")

@@ -47,7 +47,7 @@ def shader_node_add(body: dict[str, Any]) -> dict[str, Any]:
     with composite_undo(f"shader_node_add:{node_type}"):
         try:
             node = tree.nodes.new(node_type)
-        except RuntimeError as exc:
+        except (RuntimeError, TypeError) as exc:
             raise InvalidInputError(f"Unknown node type {node_type!r}: {exc}") from exc
         if name:
             node.name = name

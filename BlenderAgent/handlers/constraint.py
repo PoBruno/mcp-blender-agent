@@ -41,7 +41,7 @@ def bone_add_constraint(body: dict[str, Any]) -> dict[str, Any]:
                 raise BoneNotFoundError(f"pose bone {bone_name!r} not found")
             try:
                 c = pb.constraints.new(type=c_type)
-            except RuntimeError as exc:
+            except (RuntimeError, TypeError) as exc:
                 raise InvalidInputError(f"Unknown constraint type {c_type!r}: {exc}") from exc
             c.name = name
             if target_obj_name:
@@ -75,7 +75,7 @@ def object_add_constraint(body: dict[str, Any]) -> dict[str, Any]:
     with composite_undo(f"object_add_constraint:{obj.name}/{c_type}"):
         try:
             c = obj.constraints.new(type=c_type)
-        except RuntimeError as exc:
+        except (RuntimeError, TypeError) as exc:
             raise InvalidInputError(f"Unknown constraint type {c_type!r}: {exc}") from exc
         c.name = name
         if target_obj_name:

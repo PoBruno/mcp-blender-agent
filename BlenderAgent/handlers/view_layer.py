@@ -70,12 +70,14 @@ def view_layer_create_for_export(body: dict[str, Any]) -> dict[str, Any]:
 
 @handler("GET", "/view_layer/list")
 def view_layer_list(body: dict[str, Any]) -> dict[str, Any]:
+    import bpy  # type: ignore
     scene = get_scene(body.get("sceneName"))
+    active_vl = getattr(bpy.context, "view_layer", None)
     return {
         "ok": True,
         "data": {
             "sceneName": scene.name,
             "viewLayers": [vl.name for vl in scene.view_layers],
-            "active": scene.view_layers.active.name if scene.view_layers.active else None,
+            "active": active_vl.name if active_vl else None,
         },
     }

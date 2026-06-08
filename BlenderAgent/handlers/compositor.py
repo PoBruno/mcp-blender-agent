@@ -60,7 +60,7 @@ def compositor_add_node(body: dict[str, Any]) -> dict[str, Any]:
     with composite_undo(f"compositor_add_node:{scene.name}/{node_type}"):
         try:
             node = tree.nodes.new(node_type)
-        except RuntimeError as exc:
+        except (RuntimeError, TypeError) as exc:
             raise InvalidInputError(f"Unknown compositor node {node_type!r}: {exc}") from exc
         if name:
             node.name = name

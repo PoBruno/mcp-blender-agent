@@ -23,7 +23,11 @@ def library_link(body: dict[str, Any]) -> dict[str, Any]:
 
     linked: list[str] = []
     with composite_undo(f"library_link:{datablock_type}"):
-        with bpy.data.libraries.load(filepath, link=True) as (data_from, data_to):
+        try:
+            ctx = bpy.data.libraries.load(filepath, link=True)
+        except (ValueError, RuntimeError) as exc:
+            raise InvalidInputError(f"cannot load {filepath!r}: {exc}") from exc
+        with ctx as (data_from, data_to):
             attr_from = getattr(data_from, datablock_type.lower() + "s", None)
             attr_to = getattr(data_to, datablock_type.lower() + "s", None)
             if attr_from is None or attr_to is None:
