@@ -105,6 +105,38 @@ export function registerCameraTools(server: McpServer): void {
       },
       handler: passthroughPost("/camera/set_clipping"),
     },
+    {
+      name: "camera_frame_object",
+      description:
+        "Position a camera to frame a target object (mesh/armature) from a chosen direction. Auto-computes distance from the target's bounding box and the camera's FOV. Use for validation renders (front view of a character, top view of a layout, etc.). Defaults to making the camera active.",
+      inputSchema: {
+        cameraObjectName: z.string().describe("Existing camera object."),
+        targetObjectName: z.string().describe("Object to frame (mesh or armature)."),
+        direction: z
+          .enum(["front", "back", "left", "right", "top", "bottom", "front_top"])
+          .optional()
+          .describe("Direction the camera looks FROM (default 'front')."),
+        paddingFactor: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Multiplier on computed distance to add breathing room (default 1.4)."),
+        heightOffset: z
+          .number()
+          .optional()
+          .describe("Vertical offset added to the look-at point (default 0)."),
+        setActive: z
+          .boolean()
+          .optional()
+          .describe("Also set as scene.camera (default true)."),
+        includeChildren: z
+          .boolean()
+          .optional()
+          .describe("Include child meshes in bounds (default true; needed for rigs)."),
+        sceneName: z.string().optional().describe("Scene; default = active."),
+      },
+      handler: passthroughPost("/camera/frame_object"),
+    },
   ]);
 }
 
