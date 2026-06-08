@@ -1,0 +1,93 @@
+# mcp-blender-agent
+
+> Complete Blender control plane for AI coding agents — MCP server giving Claude Code, GitHub Copilot, Cursor, and any MCP-speaking agent full control of a Blender session: modeling, rigging, animation, materials, shader/geometry nodes, rendering, and granular export to FBX / glTF / USD / Alembic.
+
+Sister project to [PoBruno/mcp-unreal-agent](https://github.com/PoBruno/mcp-unreal-agent). Same architecture, same contracts, same harness — the Blender twin.
+
+---
+
+## Why this exists
+
+The Blender MCP space today is dominated by **creative toys**: "make a dungeon scene", "apply a red metallic material". Those exist (see [ahujasid/blender-mcp](https://github.com/ahujasid/blender-mcp), 22k+ stars) and they're great for ideation.
+
+`blender-agent` is different. It is a **production control plane**:
+
+- Every Blender operator and `bpy.data` mutation surfaces as a typed MCP tool with a Zod input schema and a structured `{ok, data, refs, nextSteps, warnings, errorCode}` output.
+- Composite atomic flows wrap multi-step mutations in a single undo push.
+- ID-chaining makes multi-tool workflows feel like dataflow — no string parsing on the agent side.
+- Granular export — every parameter of `bpy.ops.export_scene.fbx` / `export_scene.gltf` / `wm.usd_export` / `wm.alembic_export` is a tool input, not a black box.
+- Install brain detects the user's agent harness (Claude / Copilot / Cursor / Claude Desktop) and configures itself.
+- Passive context skill — always-on guidance the agent reads before touching Blender, so it picks the right tool the first time.
+
+The agent should be able to describe a low-poly character — bones, weights, sockets, idle animation, vertex naming, dimensions, texture layout, export target — and have it built end-to-end.
+
+---
+
+## What you get
+
+Two parts, mirroring `mcp-unreal-agent`:
+
+- **`BlenderAgent/` — Python addon** that lives inside Blender (or runs headless via `blender --background`). Hosts an HTTP server on port `9876`. Calls `bpy.data`, `bpy.ops`, `bmesh`, `mathutils` directly. No build step.
+- **`Tools/` — TypeScript MCP server.** Translates MCP tool calls from the agent into HTTP calls to the addon. Ships the structured tool contract, ID-chain, error registry, install brain, and passive context skill.
+
+Two serving modes:
+
+- **Addon (preferred):** auto-starts when Blender opens. Zero overhead.
+- **Headless:** spawned by the TS server when no Blender instance is detected. Used for CI, batch ops, and first-time install verification.
+
+---
+
+## Status
+
+🚧 **Phase 0 — bootstrap.** Harness in place, no tools implemented yet. See [ROADMAP.md](ROADMAP.md) and [OBJECTIVES.md](OBJECTIVES.md).
+
+---
+
+## Quick start (for now: developers only)
+
+```powershell
+git clone https://github.com/PoBruno/mcp-blender-agent.git
+cd mcp-blender-agent
+# Phase 0: nothing to run yet. Open in VS Code and follow CLAUDE.md / .github/copilot-instructions.md.
+```
+
+End-user install playbook ([install/AGENT-INSTALL.md](install/AGENT-INSTALL.md)) ships with Phase 5.
+
+---
+
+## Documentation
+
+- **[OBJECTIVES.md](OBJECTIVES.md)** — what we are building and why, success criteria, non-goals.
+- **[ROADMAP.md](ROADMAP.md)** — 5-phase delivery plan with milestones.
+- **[CLAUDE.md](CLAUDE.md)** — agent entry point. Tech stack, conventions, commands, doc index. Read first.
+- **[AGENTS.md](AGENTS.md)** — universal bridge for Cursor and other agents.
+- **[.github/copilot-instructions.md](.github/copilot-instructions.md)** — GitHub Copilot harness (delegates to CLAUDE.md).
+- **[.claude/docs/ARCHITECTURE.md](.claude/docs/ARCHITECTURE.md)** — system bible.
+- **[.claude/docs/DECISIONS.md](.claude/docs/DECISIONS.md)** — ADRs.
+
+---
+
+## Reference repositories
+
+Read-only clones live under `ref/` (gitignored). They exist so the agent and developers can study prior art:
+
+- `ref/blender-mcp/` — [ahujasid/blender-mcp](https://github.com/ahujasid/blender-mcp), the dominant Blender MCP. Reference for the addon socket pattern and Claude Desktop integration.
+- `ref/blender-ai-mcp/` — [PatrykIti/blender-ai-mcp](https://github.com/PatrykIti/blender-ai-mcp), goal-first routing and curated tools. Reference for production-shaped tool design.
+
+To refresh:
+
+```powershell
+cd ref
+git -C blender-mcp pull
+git -C blender-ai-mcp pull
+```
+
+We **never** copy code verbatim from these. We study, take inspiration, build our own to our contract.
+
+---
+
+## License
+
+MIT. See [LICENSE](LICENSE).
+
+Not affiliated with the Blender Foundation. "Blender" is a trademark of the Blender Foundation.

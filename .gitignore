@@ -1,0 +1,57 @@
+# Reference repositories — read-only, never commit
+ref/
+
+# Node
+node_modules/
+dist/
+*.log
+npm-debug.log*
+.pnpm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+Tools/dist/
+Tools/node_modules/
+Tools/coverage/
+
+# Python / Blender addon
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+.python-version
+
+# Blender state
+*.blend1
+*.blend2
+*.blend@
+*~
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/mcp.json
+!.vscode/settings.json
+.idea/
+
+# Test artifacts
+test/.blender_state/
+Tools/test/.blender_state/
+outputs/
+*.png
+*.jpg
+*.fbx
+*.glb
+*.gltf
+*.obj
+*.usd
+*.usdz
+*.abc
+
+# Env
+.env
+.env.local
