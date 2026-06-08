@@ -331,3 +331,57 @@ def _server_handlers(_body: dict[str, Any]) -> dict[str, Any]:
             "count": len(_handlers),
         },
     }
+
+
+@handler("POST", "/server/reload")
+def _server_reload(_body: dict[str, Any]) -> dict[str, Any]:
+    """Re-import every BlenderAgent.handlers.* submodule and re-register handlers.
+
+    Lets dev iterate on handler code without restarting Blender: edit a Python
+    file in BlenderAgent/handlers/, sync it into the installed addon folder,
+    then POST here. The next handler call sees the new code.
+
+    Safe because we only reload modules whose name starts with
+    'BlenderAgent.handlers.'. The registry is cleared and rebuilt; built-in
+    /server/* handlers are re-added via the import of this very module.
+    """
+    import importlib
+    import sys as _sys
+
+    # Snapshot built-in /server/* handlers so we don't lose them when wiping.
+    builtin = {k: v for k, v in _handlers.items() if k[1].startswith("/server/")}
+
+    # Wipe so duplicate registration doesn't trip
+    _handlers.clear()
+    _handlers.update(builtin)
+
+    reloaded: list[str] = []
+    errors: list[dict[str, str]] = []
+
+    # Reload the handlers package itself so __init__'s re-exports refresh
+    pkg_name = "BlenderAgent.handlers"
+    target_names = [n for n in list(_sys.modules.keys())
+                    if n == pkg_name or n.startswith(pkg_name + ".")]
+    # Deterministic order: package first, then submodules alphabetically
+    target_names.sort(key=lambda n: (0 if n == pkg_name else 1, n))
+
+    for name in target_names:
+        mod = _sys.modules.get(name)
+        if mod is None:
+            continue
+        try:
+            importlib.reload(mod)
+            reloaded.append(name)
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"module": name, "error": f"{type(exc).__name__}: {exc}"})
+
+    return {
+        "ok": len(errors) == 0,
+        "data": {
+            "reloadedCount": len(reloaded),
+            "reloaded": reloaded,
+            "handlerCount": len(_handlers),
+            "errorCount": len(errors),
+            "errors": errors,
+        },
+    }
