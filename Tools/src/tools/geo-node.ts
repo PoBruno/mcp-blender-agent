@@ -84,5 +84,29 @@ export function registerCompositorTools(server: McpServer): void {
       },
       handler: passthroughPost("/compositor/connect"),
     },
+    {
+      name: "compositor_set_node_property",
+      description:
+        "Set a direct RNA property on a compositor node (e.g. base_path on OutputFile, blend_type on MixRGB, mute on any node).",
+      inputSchema: {
+        sceneName: z.string().optional(),
+        nodeName: z.string().describe("Compositor node name."),
+        propertyName: z.string().describe("RNA property name."),
+        propertyValue: z.unknown().describe("New value (must be assignable to the property)."),
+      },
+      handler: passthroughPost("/compositor/set_node_property"),
+    },
+    {
+      name: "compositor_set_node_input",
+      description:
+        "Set the default_value of a compositor node input socket (e.g. Hue/Saturation/Value on HueSat).",
+      inputSchema: {
+        sceneName: z.string().optional(),
+        nodeName: z.string().describe("Compositor node name."),
+        inputName: z.string().describe("Input socket identifier."),
+        value: z.unknown().describe("New default value."),
+      },
+      handler: passthroughPost("/compositor/set_node_input"),
+    },
   ]);
 }

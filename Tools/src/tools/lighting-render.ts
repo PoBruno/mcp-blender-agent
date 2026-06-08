@@ -79,6 +79,32 @@ export function registerCameraTools(server: McpServer): void {
       },
       handler: passthroughPost("/camera/set_active"),
     },
+    {
+      name: "camera_set_dof",
+      description:
+        "Configure camera depth-of-field. Pass focusDistance for a fixed plane or focusObjectName to track an object.",
+      inputSchema: {
+        objectName: z.string().describe("Camera object."),
+        useDof: z.boolean().optional().describe("Enable/disable DOF (default true when called)."),
+        focusDistance: z.number().nonnegative().optional().describe("Focus distance (m)."),
+        fStop: z.number().positive().optional().describe("Aperture f-stop (lower = shallower DOF)."),
+        focusObjectName: z
+          .string()
+          .optional()
+          .describe("Object to track focus on (overrides focusDistance)."),
+      },
+      handler: passthroughPost("/camera/set_dof"),
+    },
+    {
+      name: "camera_set_clipping",
+      description: "Set near (clipStart) and far (clipEnd) clip planes on a camera.",
+      inputSchema: {
+        objectName: z.string().describe("Camera object."),
+        clipStart: z.number().positive().optional().describe("Near clip plane (m) > 0."),
+        clipEnd: z.number().positive().optional().describe("Far clip plane (m) > clipStart."),
+      },
+      handler: passthroughPost("/camera/set_clipping"),
+    },
   ]);
 }
 
@@ -129,6 +155,52 @@ export function registerRenderTools(server: McpServer): void {
           .describe("File format (default PNG)."),
       },
       handler: passthroughPost("/render/render_animation"),
+    },
+    {
+      name: "render_set_output",
+      description:
+        "Configure render output: filepath, file format, color depth, frame range, fps. Pass only the keys you want to change.",
+      inputSchema: {
+        sceneName: z.string().optional().describe("Scene; default = active."),
+        filepath: z.string().optional().describe("Output filepath / prefix."),
+        fileFormat: z
+          .enum([
+            "PNG",
+            "JPEG",
+            "BMP",
+            "IRIS",
+            "OPEN_EXR",
+            "OPEN_EXR_MULTILAYER",
+            "HDR",
+            "TIFF",
+            "TARGA",
+            "TARGA_RAW",
+            "WEBP",
+            "FFMPEG",
+            "AVI_JPEG",
+            "AVI_RAW",
+          ])
+          .optional()
+          .describe("Output file format."),
+        colorMode: z.enum(["BW", "RGB", "RGBA"]).optional().describe("Color channels."),
+        colorDepth: z
+          .enum(["8", "16", "32"])
+          .optional()
+          .describe("Bit depth (format-dependent)."),
+        frameStart: z.number().int().optional().describe("Animation start frame."),
+        frameEnd: z.number().int().optional().describe("Animation end frame."),
+        frameStep: z.number().int().positive().optional().describe("Frame stride."),
+        fps: z.number().int().positive().optional().describe("Frames per second."),
+        fpsBase: z.number().positive().optional().describe("FPS base divisor."),
+        compression: z
+          .number()
+          .int()
+          .min(0)
+          .max(100)
+          .optional()
+          .describe("PNG/EXR compression 0-100."),
+      },
+      handler: passthroughPost("/render/set_output"),
     },
   ]);
 }

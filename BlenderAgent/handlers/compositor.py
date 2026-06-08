@@ -89,3 +89,91 @@ def compositor_connect(body: dict[str, Any]) -> dict[str, Any]:
         tree.links.new(f_s, t_s)
     return {"ok": True, "data": {"sceneName": scene.name, "from": f_n.name, "to": t_n.name},
             "refs": {"sceneName": scene.name}}
+
+
+@handler("POST", "/compositor/set_node_property")
+def compositor_set_node_property(body: dict[str, Any]) -> dict[str, Any]:
+    """Set a top-level property on a compositor node (e.g. base_path, blend_type).
+
+    Body: {sceneName?: str, nodeName: str, propertyName: str, propertyValue: any}
+
+    Use for primitive node attributes that are RNA properties of the node itself.
+    Examples: `base_path` on CompositorNodeOutputFile; `blend_type` on
+    CompositorNodeMixRGB; `mute` on any node; `label` on any node.
+    """
+    scene = get_scene(body.get("sceneName"))
+    tree = _ensure_compositor(scene)
+    node_name = body.get("nodeName")
+    prop_name = body.get("propertyName")
+    if not node_name or not prop_name:
+        raise InvalidInputError("nodeName and propertyName are required")
+    if "propertyValue" not in body:
+        raise InvalidInputError("propertyValue is required")
+    node = tree.nodes.get(node_name)
+    if node is None:
+        raise NodeNotFoundError(f"compositor node {node_name!r} not found")
+    if not hasattr(node, prop_name):
+        raise InvalidInputError(
+            f"node {node_name!r} ({node.bl_idname}) has no property {prop_name!r}"
+        )
+    value = body["propertyValue"]
+    with composite_undo(f"compositor_set_node_property:{node.name}.{prop_name}"):
+        try:
+            setattr(node, prop_name, value)
+        except (TypeError, ValueError) as exc:
+            raise InvalidInputError(
+                f"cannot set {prop_name!r} on {node.name!r}: {exc}"
+            ) from exc
+    return {
+        "ok": True,
+        "data": {
+            "sceneName": scene.name,
+            "nodeName": node.name,
+            "propertyName": prop_name,
+            "propertyValue": getattr(node, prop_name),
+        },
+        "refs": {"sceneName": scene.name, "nodeName": node.name},
+    }
+
+
+@handler("POST", "/compositor/set_node_input")
+def compositor_set_node_input(body: dict[str, Any]) -> dict[str, Any]:
+    """Set the default_value of a compositor node's input socket.
+
+    Body: {sceneName?: str, nodeName: str, inputName: str, value: any}
+
+    Example: set `Hue`/`Saturation`/`Value` on CompositorNodeHueSat without linking.
+    """
+    scene = get_scene(body.get("sceneName"))
+    tree = _ensure_compositor(scene)
+    node_name = body.get("nodeName")
+    input_name = body.get("inputName")
+    if not node_name or not input_name:
+        raise InvalidInputError("nodeName and inputName are required")
+    if "value" not in body:
+        raise InvalidInputError("value is required")
+    node = tree.nodes.get(node_name)
+    if node is None:
+        raise NodeNotFoundError(f"compositor node {node_name!r} not found")
+    sock = node.inputs.get(input_name)
+    if sock is None:
+        raise InvalidInputError(
+            f"node {node_name!r} has no input socket {input_name!r}"
+        )
+    value = body["value"]
+    with composite_undo(f"compositor_set_node_input:{node.name}.{input_name}"):
+        try:
+            sock.default_value = value
+        except (TypeError, ValueError) as exc:
+            raise InvalidInputError(
+                f"cannot set input {input_name!r} on {node.name!r}: {exc}"
+            ) from exc
+    return {
+        "ok": True,
+        "data": {
+            "sceneName": scene.name,
+            "nodeName": node.name,
+            "inputName": input_name,
+        },
+        "refs": {"sceneName": scene.name, "nodeName": node.name},
+    }
