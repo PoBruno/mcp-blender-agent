@@ -508,6 +508,7 @@ async function main() {
       bakeSpaceTransform: true,
       addLeafBones: false,
       useArmatureDeformOnly: false,
+      useCustomProps: true,
       primaryBoneAxis: "Y",
       secondaryBoneAxis: "X",
     }));
@@ -516,15 +517,24 @@ async function main() {
   }
 
   // ── §11 ── export AimOffset FBX → delivery/aim/ ──────────────────────────
+  // UE5 BlendSpace2D requires ONE AnimSequence per sample (9 individual FBX),
+  // not a single 9-frame take. We:
+  //   (a) keep the aggregated 9-frame AS_AimOffset_Char.fbx for preview /
+  //       debugging — easy to drop into Blender and visually inspect 9 poses
+  //       in one timeline.
+  //   (b) split the master action into 9 single-frame actions named
+  //       AS_AimOffset_Char_<cell> where cell ∈ {LU,CU,RU,LC,CC,RC,LD,CD,RD}.
+  //   (c) export each as its own 1-frame FBX → these are the actual
+  //       BlendSpace2D inputs.
   log("");
-  log("## §11 — export AS_AimOffset_Char.fbx (9-pose)");
+  log("## §11 — export AS_AimOffset_Char.fbx (aggregated 9-pose) + 9 BS2D samples");
   log("");
   await step("/action/assign_to_object AimOffset_Char",
     () => blenderPost("/action/assign_to_object", {
       objectName: armName, actionName: "AimOffset_Char",
     }));
   const aimPath = join(D_AIM, "AS_AimOffset_Char.fbx");
-  await step("/export/fbx_animation",
+  await step("/export/fbx_animation (aggregated 9f)",
     () => blenderPost("/export/fbx_animation", {
       filepath: aimPath,
       armatureObjectName: armName,
@@ -532,11 +542,51 @@ async function main() {
       axisForward: "-Y", axisUp: "Z",
       bakeSpaceTransform: true, addLeafBones: false,
       useArmatureDeformOnly: false,
+      useCustomProps: true,
       useNlaStrips: false,
       primaryBoneAxis: "Y", secondaryBoneAxis: "X",
     }));
   if (existsSync(aimPath)) {
     log(`> ${basename(aimPath)} — **${(statSync(aimPath).size / 1024).toFixed(1)} KB**`);
+  }
+
+  // 11b — split master action into 9 single-frame actions
+  const splitRes = await step("/aim_offset/split_to_9_single_frame_actions",
+    () => blenderPost("/aim_offset/split_to_9_single_frame_actions", {
+      armatureObjectName: armName,
+      sourceActionName: "AimOffset_Char",
+      targetPrefix: "AS_AimOffset_Char_",
+      frameStart: 1,
+    }));
+  const aimCellActions = splitRes?.data?.actionNames ?? [];
+  log(`> split → ${aimCellActions.length} single-frame actions (${aimCellActions.join(", ")})`);
+
+  // 11c — export each cell as its own 1-frame FBX
+  for (const actName of aimCellActions) {
+    const cellPath = join(D_AIM, `${actName}.fbx`);
+    await step(`export ${actName} (1f)`,
+      async () => {
+        const assign = await blenderPost("/action/assign_to_object", {
+          objectName: armName, actionName: actName,
+        });
+        if (!assign.ok) return assign;
+        const exp = await blenderPost("/export/fbx_animation", {
+          filepath: cellPath,
+          armatureObjectName: armName,
+          globalScale: 1.0, applyUnitScale: true,
+          axisForward: "-Y", axisUp: "Z",
+          bakeSpaceTransform: true, addLeafBones: false,
+          useArmatureDeformOnly: false,
+          useCustomProps: true,
+          useNlaStrips: false,
+          frameStart: 1, frameEnd: 1,
+          primaryBoneAxis: "Y", secondaryBoneAxis: "X",
+        });
+        if (exp.ok && existsSync(cellPath)) {
+          log(`> ${basename(cellPath)} — ${(statSync(cellPath).size / 1024).toFixed(1)} KB`);
+        }
+        return exp;
+      });
   }
 
   // ── §12 ── per-action exports → delivery/{locomotion,throw}/ ─────────────
@@ -550,8 +600,12 @@ async function main() {
 
   // 12a — inspect every action to learn fcurve composition + dedup hash
   const inspected = [];
+  // Cell actions are exported individually in §11; they share the same fcurve
+  // signature as the master and would dedup-collide otherwise.
+  const aimCellNameSet = new Set(aimCellActions);
   for (const a of allActions) {
     if (a.name === "AimOffset_Char") continue; // already exported in §11
+    if (aimCellNameSet.has(a.name)) continue;   // exported as BS2D sample in §11c
     const r = await blenderPost("/action/inspect", { actionName: a.name });
     if (!r.ok) {
       log(`> ⚠ inspect failed for ${a.name}: ${r.errorCode}`);
@@ -658,6 +712,7 @@ async function main() {
           axisForward: "-Y", axisUp: "Z",
           bakeSpaceTransform: true, addLeafBones: false,
           useArmatureDeformOnly: false,
+          useCustomProps: true,
           useNlaStrips: false,
           primaryBoneAxis: "Y", secondaryBoneAxis: "X",
         });
