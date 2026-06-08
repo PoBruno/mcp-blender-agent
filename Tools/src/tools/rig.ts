@@ -176,6 +176,26 @@ export function registerBoneTools(server: McpServer): void {
       handler: passthroughPost("/bone/delete"),
     },
     {
+      name: "bone_delete_by_pattern",
+      description:
+        "Bulk-delete bones whose name matches a Python regex. Children of a deleted bone are reparented up one level so chains stay intact. Use to strip _end leaf artifacts before FBX export to UE5. Set dryRun=true to preview matches first.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        pattern: z
+          .string()
+          .describe("Python regex; bones whose name matches (re.search) are deleted."),
+        dryRun: z
+          .boolean()
+          .optional()
+          .describe("When true, only returns what WOULD be deleted (default false)."),
+        excludeRoots: z
+          .boolean()
+          .optional()
+          .describe("Never delete a bone with no parent (default true)."),
+      },
+      handler: passthroughPost("/bone/delete_by_pattern"),
+    },
+    {
       name: "bone_list",
       description:
         "List all edit bones with head/tail/roll/length/parent/useDeform/useConnect. Optional substring name filter. Use to audit a rig (find rolled bones, build a name set for renaming, verify UE5 convention).",

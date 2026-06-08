@@ -163,6 +163,95 @@ def bone_delete(body: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "data": {"armatureObjectName": arm.name, "deletedBone": name}}
 
 
+@handler("POST", "/bone/delete_by_pattern")
+def bone_delete_by_pattern(body: dict[str, Any]) -> dict[str, Any]:
+    """Bulk-delete edit bones whose name matches a regex pattern.
+
+    Used to strip leaf/_end artifact bones the FBX exporter would otherwise
+    carry into UE5. Children of a deleted bone are reparented to the deleted
+    bone's parent so the chain stays intact.
+
+    Body: {
+      armatureObjectName: str,
+      pattern: str,            # Python regex (re.search semantics)
+      dryRun?: bool,           # default false — when true, just lists matches
+      excludeRoots?: bool,     # default true — never delete a bone with no parent
+    }
+
+    Returns: {deletedBones: [str], skippedRoots: [str], matchedCount: int}
+    """
+    import re
+    arm = get_armature_object(body.get("armatureObjectName"))
+    pattern = body.get("pattern")
+    if not pattern:
+        raise InvalidInputError("pattern is required")
+    try:
+        rx = re.compile(pattern)
+    except re.error as exc:
+        raise InvalidInputError(f"invalid regex {pattern!r}: {exc}") from exc
+    dry_run = bool(body.get("dryRun", False))
+    exclude_roots = bool(body.get("excludeRoots", True))
+
+    deleted: list[str] = []
+    skipped_roots: list[str] = []
+
+    with composite_undo(f"bone_delete_by_pattern:{arm.name}/{pattern}"):
+        set_active_and_selected(arm)
+        with with_mode(arm, "EDIT"):
+            eb = arm.data.edit_bones
+            # Snapshot names first — mutating eb while iterating breaks the loop.
+            candidates = [b.name for b in eb if rx.search(b.name)]
+            if dry_run:
+                return {
+                    "ok": True,
+                    "data": {
+                        "armatureObjectName": arm.name,
+                        "pattern": pattern,
+                        "dryRun": True,
+                        "matchedCount": len(candidates),
+                        "wouldDelete": candidates,
+                    },
+                    "refs": {"armatureName": arm.name},
+                }
+            # Sort by depth descending so children disappear before parents
+            # (avoids reparenting work).
+            def depth(b_name: str) -> int:
+                b = eb.get(b_name)
+                d = 0
+                while b is not None and b.parent is not None:
+                    d += 1
+                    b = b.parent
+                return d
+            candidates.sort(key=depth, reverse=True)
+
+            for name in candidates:
+                if name not in eb:
+                    continue
+                b = eb[name]
+                if exclude_roots and b.parent is None:
+                    skipped_roots.append(name)
+                    continue
+                # Reparent any (still-existing) children up one level.
+                new_parent = b.parent
+                for child in list(b.children):
+                    child.parent = new_parent
+                eb.remove(b)
+                deleted.append(name)
+
+    return {
+        "ok": True,
+        "data": {
+            "armatureObjectName": arm.name,
+            "pattern": pattern,
+            "dryRun": False,
+            "matchedCount": len(candidates),
+            "deletedBones": deleted,
+            "skippedRoots": skipped_roots,
+        },
+        "refs": {"armatureName": arm.name},
+    }
+
+
 @handler("POST", "/bone/list")
 def bone_list(body: dict[str, Any]) -> dict[str, Any]:
     """List all edit bones with head/tail/roll/parent/length.
