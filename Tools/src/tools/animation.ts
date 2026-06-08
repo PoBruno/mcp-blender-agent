@@ -93,8 +93,49 @@ export function registerAnimationTools(server: McpServer): void {
           .int()
           .optional()
           .describe("First frame (default 1; 9 poses written to frameStart..frameStart+8)."),
+        yawAxisWorld: z
+          .array(z.number())
+          .length(3)
+          .optional()
+          .describe("World yaw axis (default [0,0,1] — character up)."),
+        pitchAxisWorld: z
+          .array(z.number())
+          .length(3)
+          .optional()
+          .describe("World pitch axis (default [1,0,0] — character right)."),
       },
       handler: passthroughPost("/aim_offset/bake_9_pose_matrix"),
+    },
+    {
+      name: "aim_offset_validate_9_pose_matrix",
+      description:
+        "Replay a baked AimOffset and measure the WORLD-space yaw/pitch the probe bone (typically the head) actually reaches at each of the 9 frames. Returns per-pose error in degrees and a maxErrorDeg. Use after aim_offset_bake_9_pose_matrix to catch local-axis bugs that look correct numerically but render broken.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        actionName: z.string().optional().describe("Action to evaluate (default 'AimOffset')."),
+        probeBoneName: z
+          .string()
+          .describe("Bone whose world rotation is sampled — typically the head bone."),
+        yawDegMax: z.number().positive().optional().describe("Max yaw angle (default 90)."),
+        pitchDegMax: z.number().positive().optional().describe("Max pitch angle (default 45)."),
+        frameStart: z.number().int().optional().describe("First frame (default 1)."),
+        toleranceDeg: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Pass threshold for |actual-expected| on yaw AND pitch (default 5°)."),
+        yawAxisWorld: z
+          .array(z.number())
+          .length(3)
+          .optional()
+          .describe("World yaw axis used to build the expected rotation (default [0,0,1])."),
+        pitchAxisWorld: z
+          .array(z.number())
+          .length(3)
+          .optional()
+          .describe("World pitch axis used to build the expected rotation (default [1,0,0])."),
+      },
+      handler: passthroughPost("/aim_offset/validate_9_pose_matrix"),
     },
     {
       name: "keyframe_add",

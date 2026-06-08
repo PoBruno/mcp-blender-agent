@@ -373,17 +373,25 @@ def aim_offset_bake_9_pose_matrix(body: dict[str, Any]) -> dict[str, Any]:
     """Bake a 9-pose AimOffset (3x3 yaw/pitch grid) by distributing rotation
     across spine + neck + head bones (ARTIS §3.3).
 
+    Rotations are computed in WORLD space (yaw around world Z, pitch around
+    world X by default) and converted to each bone's rest-local frame via
+    conjugation: q_local = R_rest^-1 @ q_world @ R_rest. This makes the bake
+    correct regardless of bone roll or whether the bone's local Y axis points
+    up (typical humanoid) or somewhere else.
+
     Body: {
       armatureObjectName: str,
       actionName?: str (default 'AimOffset'),
       spineBoneName: str,            # e.g. 'spine_02'
       neckBoneName: str,             # e.g. 'neck_01'
       headBoneName: str,             # e.g. 'head_01'
-      yawWeights?: [spine, neck, head],   # default [0.17, 0.22, 0.61] (60/40 split: 39% body, 61% head)
-      pitchWeights?: [spine, neck, head], # default [0.05, 0.15, 0.80] (briefing: pitch só na cabeça)
+      yawWeights?: [spine, neck, head],   # default [0.17, 0.22, 0.61] (39% body / 61% head)
+      pitchWeights?: [spine, neck, head], # default [0.05, 0.15, 0.80] (pitch concentrated on head)
       yawDegMax?: float,             # default 90
       pitchDegMax?: float,           # default 45
       frameStart?: int,              # default 1 (frames 1..9)
+      yawAxisWorld?: [x,y,z],        # default [0,0,1] — character "up" in world
+      pitchAxisWorld?: [x,y,z],      # default [1,0,0] — character "right" in world
     }
 
     Frame layout (matches §3.3 table):
@@ -397,7 +405,7 @@ def aim_offset_bake_9_pose_matrix(body: dict[str, Any]) -> dict[str, Any]:
     """
     import math
     import bpy  # type: ignore
-    from mathutils import Quaternion  # type: ignore
+    from mathutils import Quaternion, Vector  # type: ignore
 
     arm = get_armature_object(body.get("armatureObjectName"))
     action_name = body.get("actionName") or "AimOffset"
@@ -414,6 +422,8 @@ def aim_offset_bake_9_pose_matrix(body: dict[str, Any]) -> dict[str, Any]:
     yaw_max_deg = float(body.get("yawDegMax", 90.0))
     pitch_max_deg = float(body.get("pitchDegMax", 45.0))
     frame_start = int(body.get("frameStart", 1))
+    yaw_axis_world = Vector(tuple(body.get("yawAxisWorld") or (0.0, 0.0, 1.0))).normalized()
+    pitch_axis_world = Vector(tuple(body.get("pitchAxisWorld") or (1.0, 0.0, 0.0))).normalized()
 
     if len(yaw_weights) != 3 or len(pitch_weights) != 3:
         raise InvalidInputError("yawWeights and pitchWeights must each be 3 floats (spine, neck, head)")
@@ -449,17 +459,30 @@ def aim_offset_bake_9_pose_matrix(body: dict[str, Any]) -> dict[str, Any]:
 
         # Switch to pose mode for keyframing
         with with_mode(arm, "POSE"):
+            # Pre-compute per-bone rest-orientation in world space; we conjugate
+            # the desired world rotation into the bone's local frame so the bake
+            # is independent of bone roll / local axis convention.
+            arm_world = arm.matrix_world
+            rest_world_rots = {}
+            for bname, _yw, _pw in bones:
+                rest_world_rots[bname] = (arm_world @ arm.pose.bones[bname].bone.matrix_local).to_quaternion()
+
             for f_off, yaw_f, pitch_f in poses:
                 frame = frame_start + f_off
                 for bname, yaw_w, pitch_w in bones:
                     pb = arm.pose.bones[bname]
                     yaw_rad = math.radians(yaw_max_deg * yaw_f * yaw_w)
                     pitch_rad = math.radians(pitch_max_deg * pitch_f * pitch_w)
-                    # Yaw around bone-local Z, pitch around bone-local X
-                    q_yaw = Quaternion((0.0, 0.0, 1.0), yaw_rad)
-                    q_pitch = Quaternion((1.0, 0.0, 0.0), pitch_rad)
+                    # Desired rotation share in WORLD space:
+                    q_world = (
+                        Quaternion(yaw_axis_world, yaw_rad)
+                        @ Quaternion(pitch_axis_world, pitch_rad)
+                    )
+                    # Convert to bone-local: q_local = R_rest^-1 @ q_world @ R_rest
+                    rest_rot = rest_world_rots[bname]
+                    q_local = rest_rot.inverted() @ q_world @ rest_rot
                     pb.rotation_mode = "QUATERNION"
-                    pb.rotation_quaternion = q_yaw @ q_pitch
+                    pb.rotation_quaternion = q_local
                     arm.keyframe_insert(
                         data_path=f'pose.bones["{bname}"].rotation_quaternion',
                         frame=frame,
@@ -486,6 +509,133 @@ def aim_offset_bake_9_pose_matrix(body: dict[str, Any]) -> dict[str, Any]:
         "refs": {
             "armatureName": arm.name,
             "actionName": act.name,
+        },
+    }
+
+
+@handler("POST", "/aim_offset/validate_9_pose_matrix")
+def aim_offset_validate_9_pose_matrix(body: dict[str, Any]) -> dict[str, Any]:
+    """Validate a baked 9-pose AimOffset by measuring the WORLD-space rotation
+    delta of a probe bone (typically the head) at each pose frame and comparing
+    against the expected yaw/pitch.
+
+    Per-pose metric is the QUATERNION GEODESIC DISTANCE between the actual
+    delta and the expected `Q_yaw @ Q_pitch`. This is the correct invariant
+    for composed rotations — Euler decomposition fails on corners because the
+    chain (spine→neck→head) doesn't commute.
+
+    For reporting we also emit the actual yaw/pitch as decomposed in 'ZXY'
+    order (which IS clean for pure-axis poses 2, 4, 5, 6, 8) so artists can
+    eyeball single-axis bones easily.
+
+    Body: {
+      armatureObjectName: str,
+      actionName?: str (default 'AimOffset'),
+      probeBoneName: str,            # bone whose world rotation is measured (typically head)
+      yawDegMax?: float,             # default 90
+      pitchDegMax?: float,           # default 45
+      frameStart?: int,              # default 1
+      toleranceDeg?: float,          # default 5.0 (on quaternion angle)
+      yawAxisWorld?: [x,y,z],        # default [0,0,1]
+      pitchAxisWorld?: [x,y,z],      # default [1,0,0]
+    }
+    """
+    import math
+    import bpy  # type: ignore
+    from mathutils import Quaternion, Vector  # type: ignore
+
+    arm = get_armature_object(body.get("armatureObjectName"))
+    action_name = body.get("actionName") or "AimOffset"
+    probe_name = body.get("probeBoneName")
+    if not probe_name:
+        raise InvalidInputError("probeBoneName is required (typically the head bone)")
+    yaw_max_deg = float(body.get("yawDegMax", 90.0))
+    pitch_max_deg = float(body.get("pitchDegMax", 45.0))
+    frame_start = int(body.get("frameStart", 1))
+    tolerance = float(body.get("toleranceDeg", 5.0))
+    yaw_axis = Vector(tuple(body.get("yawAxisWorld") or (0.0, 0.0, 1.0))).normalized()
+    pitch_axis = Vector(tuple(body.get("pitchAxisWorld") or (1.0, 0.0, 0.0))).normalized()
+
+    if action_name not in bpy.data.actions:
+        raise InvalidInputError(f"action {action_name!r} not found")
+    if probe_name not in arm.pose.bones:
+        raise BoneNotFoundError(f"{probe_name!r} not in armature {arm.name!r}")
+
+    # Make sure the action is the one being evaluated
+    if arm.animation_data is None:
+        arm.animation_data_create()
+    prev_action = arm.animation_data.action
+    arm.animation_data.action = bpy.data.actions[action_name]
+
+    poses = [
+        (0, -1, +1), (1, 0, +1), (2, +1, +1),
+        (3, -1, 0),  (4, 0, 0),  (5, +1, 0),
+        (6, -1, -1), (7, 0, -1), (8, +1, -1),
+    ]
+
+    scn = bpy.context.scene
+    saved_frame = scn.frame_current
+
+    pb = arm.pose.bones[probe_name]
+    rest_world_rot = (arm.matrix_world @ pb.bone.matrix_local).to_quaternion()
+
+    results = []
+    max_err = 0.0
+    try:
+        for f_off, yaw_f, pitch_f in poses:
+            frame = frame_start + f_off
+            scn.frame_set(frame)
+            pose_world_mat = arm.matrix_world @ pb.matrix
+            pose_world_rot = pose_world_mat.to_quaternion()
+            delta = pose_world_rot @ rest_world_rot.inverted()
+
+            # Expected world rotation = same composition the bake applies
+            expected_yaw_rad = math.radians(yaw_max_deg * yaw_f)
+            expected_pitch_rad = math.radians(pitch_max_deg * pitch_f)
+            expected = (
+                Quaternion(yaw_axis, expected_yaw_rad)
+                @ Quaternion(pitch_axis, expected_pitch_rad)
+            )
+
+            # Geodesic distance: angle of (delta @ expected^-1). Use abs(w) to
+            # collapse the q ≡ -q double-cover.
+            diff = delta @ expected.inverted()
+            w = max(-1.0, min(1.0, abs(diff.w)))
+            angle_err_deg = math.degrees(2.0 * math.acos(w))
+            max_err = max(max_err, angle_err_deg)
+
+            # Decompose-for-reporting (clean only on single-axis poses).
+            eul = delta.to_euler("ZXY")
+            results.append({
+                "frame": frame,
+                "expectedYawDeg": round(math.degrees(expected_yaw_rad), 3),
+                "actualYawDeg": round(math.degrees(eul.z), 3),
+                "expectedPitchDeg": round(math.degrees(expected_pitch_rad), 3),
+                "actualPitchDeg": round(math.degrees(eul.x), 3),
+                "angleErrorDeg": round(angle_err_deg, 3),
+                "pass": angle_err_deg <= tolerance,
+            })
+    finally:
+        scn.frame_set(saved_frame)
+        if prev_action is not None:
+            arm.animation_data.action = prev_action
+
+    all_pass = all(p["pass"] for p in results)
+    return {
+        "ok": True,
+        "data": {
+            "armatureObjectName": arm.name,
+            "actionName": action_name,
+            "probeBoneName": probe_name,
+            "toleranceDeg": tolerance,
+            "maxErrorDeg": round(max_err, 3),
+            "allPass": all_pass,
+            "poses": results,
+        },
+        "refs": {
+            "armatureName": arm.name,
+            "actionName": action_name,
+            "boneName": probe_name,
         },
     }
 
