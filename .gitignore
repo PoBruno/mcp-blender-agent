@@ -55,3 +55,4 @@ outputs/
 # Env
 .env
 .env.local
+.artis-run/
