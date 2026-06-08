@@ -199,5 +199,141 @@ export function registerAnimationTools(server: McpServer): void {
       },
       handler: passthroughPost("/nla/push_action_to_strip"),
     },
+    {
+      name: "nla_track_add",
+      description: "Create an empty NLA track on an object. Returns the (possibly auto-suffixed) track name.",
+      inputSchema: {
+        objectName: z.string().describe("Owner object."),
+        trackName: z.string().optional().describe("Desired name (default 'NlaTrack')."),
+      },
+      handler: passthroughPost("/nla/track_add"),
+    },
+    {
+      name: "nla_list",
+      description:
+        "List every NLA track and its strips for an object. Returns blend type, extrapolation, frame range, mute and influence per strip.",
+      inputSchema: {
+        objectName: z.string().describe("Owner object."),
+      },
+      handler: passthroughPost("/nla/list"),
+    },
+    {
+      name: "nla_strip_remove",
+      description: "Remove a strip from an NLA track by name. Idempotent on absence.",
+      inputSchema: {
+        objectName: z.string().describe("Owner object."),
+        trackName: z.string().describe("Track containing the strip."),
+        stripName: z.string().describe("Strip to remove."),
+      },
+      handler: passthroughPost("/nla/strip_remove"),
+    },
+    {
+      name: "nla_strip_update",
+      description:
+        "Mutate an NLA strip in place: blend type, extrapolation, mute, influence, frame range. Pass only the keys you want to change.",
+      inputSchema: {
+        objectName: z.string().describe("Owner object."),
+        trackName: z.string().describe("Track containing the strip."),
+        stripName: z.string().describe("Strip to update."),
+        blendType: z.enum(["REPLACE", "COMBINE", "ADD", "SUBTRACT", "MULTIPLY"]).optional(),
+        extrapolation: z.enum(["NOTHING", "HOLD", "HOLD_FORWARD"]).optional(),
+        mute: z.boolean().optional(),
+        influence: z.number().min(0).max(1).optional(),
+        frameStart: z.number().optional(),
+        frameEnd: z.number().optional(),
+      },
+      handler: passthroughPost("/nla/strip_update"),
+    },
+    {
+      name: "anim_bake_action",
+      description:
+        "Bake an object's evaluated motion (constraints + drivers + NLA) into a flat keyed action. Wraps bpy.ops.nla.bake. Use to flatten IK solutions before export. POSE bake for armatures, OBJECT bake for everything else. Set clearConstraints=true to fully replace the rig solver with keyframes.",
+      inputSchema: {
+        objectName: z.string().describe("Armature or other animated object."),
+        frameStart: z.number().int().describe("First frame to bake."),
+        frameEnd: z.number().int().describe("Last frame to bake."),
+        step: z.number().int().min(1).optional().describe("Frame step (default 1)."),
+        onlySelectedBones: z.boolean().optional().describe("Restrict to selected pose bones (default false)."),
+        visualKeying: z.boolean().optional().describe("Evaluate constraints (default true)."),
+        clearConstraints: z.boolean().optional().describe("Delete constraints after baking (default false)."),
+        clearParents: z.boolean().optional().describe("Delete parents after baking (default false)."),
+        useCurrentAction: z.boolean().optional().describe("Bake into the existing action (default false → new action)."),
+        bakeTypes: z
+          .array(z.enum(["POSE", "OBJECT"]))
+          .optional()
+          .describe("What to bake (default ['POSE'] for armatures, ['OBJECT'] otherwise)."),
+      },
+      handler: passthroughPost("/anim/bake_action"),
+    },
+    {
+      name: "fcurve_list",
+      description:
+        "List every fcurve on an action with metadata: data_path, array_index, keyframe count, interpolation types, frame and value range, modifiers. Layered-API aware. Set includeKeyframes=true to also emit per-key frame/value/interpolation/easing.",
+      inputSchema: {
+        actionName: z.string().describe("Action to inspect."),
+        dataPathFilter: z.string().optional().describe("Substring filter on data_path."),
+        includeKeyframes: z.boolean().optional().describe("Emit full keyframe arrays (default false)."),
+      },
+      handler: passthroughPost("/fcurve/list"),
+    },
+    {
+      name: "fcurve_evaluate",
+      description:
+        "Evaluate one fcurve at one or more frames. Use to validate bakes (compare expected vs actual values) or to drive procedural keyframing.",
+      inputSchema: {
+        actionName: z.string().describe("Action containing the fcurve."),
+        dataPath: z.string().describe("fcurve data_path (e.g. 'pose.bones[\"head\"].rotation_quaternion')."),
+        arrayIndex: z.number().int().optional().describe("Array index (default 0)."),
+        frames: z.array(z.number()).min(1).describe("Frames to sample."),
+      },
+      handler: passthroughPost("/fcurve/evaluate"),
+    },
+    {
+      name: "keyframe_set_interpolation",
+      description:
+        "Set interpolation / easing / handle types on existing fcurve keyframes. Filter by data_path substring + array_index + frame range. Interpolation: BEZIER LINEAR CONSTANT SINE QUAD CUBIC QUART QUINT EXPO CIRC BACK BOUNCE ELASTIC. Easing: AUTO EASE_IN EASE_OUT EASE_IN_OUT. Handles: FREE ALIGNED VECTOR AUTO AUTO_CLAMPED.",
+      inputSchema: {
+        actionName: z.string().describe("Action."),
+        dataPathFilter: z.string().optional().describe("Substring match on fcurve.data_path."),
+        arrayIndex: z.number().int().optional().describe("Restrict to a single array index."),
+        frameStart: z.number().optional().describe("Only keys at frame >= this."),
+        frameEnd: z.number().optional().describe("Only keys at frame <= this."),
+        interpolation: z
+          .enum([
+            "CONSTANT", "LINEAR", "BEZIER", "SINE", "QUAD", "CUBIC", "QUART",
+            "QUINT", "EXPO", "CIRC", "BACK", "BOUNCE", "ELASTIC",
+          ])
+          .optional(),
+        easing: z.enum(["AUTO", "EASE_IN", "EASE_OUT", "EASE_IN_OUT"]).optional(),
+        handleLeft: z.enum(["FREE", "ALIGNED", "VECTOR", "AUTO", "AUTO_CLAMPED"]).optional(),
+        handleRight: z.enum(["FREE", "ALIGNED", "VECTOR", "AUTO", "AUTO_CLAMPED"]).optional(),
+      },
+      handler: passthroughPost("/keyframe/set_interpolation"),
+    },
+    {
+      name: "fcurve_add_modifier",
+      description:
+        "Add an fcurve modifier to one or more channels. CYCLES makes a clip loop without re-keying (set params.mode_before/mode_after='REPEAT'). NOISE adds procedural jitter. GENERATOR/FNGENERATOR drive math expressions. STEPPED quantizes the curve.",
+      inputSchema: {
+        actionName: z.string().describe("Action."),
+        type: z
+          .enum(["GENERATOR", "FNGENERATOR", "ENVELOPE", "CYCLES", "NOISE", "LIMITS", "STEPPED"])
+          .describe("Modifier type."),
+        dataPathFilter: z.string().optional().describe("Substring match (default = all fcurves)."),
+        arrayIndex: z.number().int().optional(),
+        params: z.record(z.unknown()).optional().describe("setattr on the modifier (e.g. {mode_before:'REPEAT', strength:0.5})."),
+      },
+      handler: passthroughPost("/fcurve/add_modifier"),
+    },
+    {
+      name: "action_duplicate",
+      description:
+        "Deep-copy an action with a new name. Uses bpy's built-in .copy() so both legacy and layered fcurves are preserved verbatim. Fails if newName already exists.",
+      inputSchema: {
+        actionName: z.string().describe("Source action."),
+        newName: z.string().describe("Name for the new action (must be unique)."),
+      },
+      handler: passthroughPost("/action/duplicate"),
+    },
   ]);
 }

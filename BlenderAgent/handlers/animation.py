@@ -12,6 +12,8 @@ from ..helpers import (
     get_action,
     get_armature_object,
     get_object,
+    set_active_and_selected,
+    with_3dview_context,
     with_mode,
 )
 from ..server import handler
@@ -919,3 +921,553 @@ def scene_set_frame_range(body: dict[str, Any]) -> dict[str, Any]:
         },
         "refs": {"sceneName": scene.name},
     }
+
+
+# ============================================================================
+# §  Bake-action / fcurve manipulation / NLA editing
+# ============================================================================
+
+
+# Iterate (channelbag, fcurve) for every fcurve on an action, layered-aware.
+def _iter_channelbag_fcurves(act: Any):
+    """Yield (container, fcurve) where container is either action.fcurves
+    (legacy) or a channelbag.fcurves (layered) — needed to call .remove(fc)
+    correctly across both APIs."""
+    fc_list = getattr(act, "fcurves", None)
+    if fc_list is not None:
+        try:
+            for cu in list(fc_list):
+                yield (fc_list, cu)
+            return
+        except TypeError:
+            pass
+
+    layers = getattr(act, "layers", None)
+    slots = getattr(act, "slots", None)
+    if layers is None or slots is None:
+        return
+    for layer in layers:
+        for strip in getattr(layer, "strips", []):
+            for slot in slots:
+                cb = None
+                if hasattr(strip, "channelbag"):
+                    try:
+                        cb = strip.channelbag(slot)
+                    except (RuntimeError, TypeError):
+                        cb = None
+                if cb is None or not hasattr(cb, "fcurves"):
+                    continue
+                try:
+                    for cu in list(cb.fcurves):
+                        yield (cb.fcurves, cu)
+                except TypeError:
+                    pass
+
+
+_INTERPOLATION_TYPES = {
+    "CONSTANT", "LINEAR", "BEZIER",
+    "SINE", "QUAD", "CUBIC", "QUART", "QUINT",
+    "EXPO", "CIRC", "BACK", "BOUNCE", "ELASTIC",
+}
+_EASING_TYPES = {"AUTO", "EASE_IN", "EASE_OUT", "EASE_IN_OUT"}
+_HANDLE_TYPES = {"FREE", "ALIGNED", "VECTOR", "AUTO", "AUTO_CLAMPED"}
+
+
+@handler("POST", "/anim/bake_action")
+def anim_bake_action(body: dict[str, Any]) -> dict[str, Any]:
+    """Bake an object's evaluated motion (constraints + drivers + NLA) into a
+    fresh keyed action.
+
+    Wraps `bpy.ops.nla.bake`. Use this to flatten IK/constraint solutions into
+    a clean per-frame action that exports cleanly to game engines.
+
+    Body: {
+      objectName: str,                     # armature OR mesh
+      frameStart: int,
+      frameEnd: int,
+      step?: int,                          # default 1
+      onlySelectedBones?: bool,            # default false (bake all)
+      visualKeying?: bool,                 # default true (evaluate constraints)
+      clearConstraints?: bool,             # default false (KEEP the rig)
+      clearParents?: bool,                 # default false
+      useCurrentAction?: bool,             # default false (creates new)
+      bakeTypes?: ['POSE'] | ['OBJECT'] | ['POSE','OBJECT']  // default depends on object type
+    }
+
+    Returns: { actionName, frameStart, frameEnd, keyedFcurveCount }
+    """
+    import bpy  # type: ignore
+
+    obj = get_object(body.get("objectName"))
+    frame_start = body.get("frameStart")
+    frame_end = body.get("frameEnd")
+    if frame_start is None or frame_end is None:
+        raise InvalidInputError("frameStart and frameEnd are required")
+    frame_start = int(frame_start)
+    frame_end = int(frame_end)
+    if frame_end < frame_start:
+        raise InvalidInputError("frameEnd must be >= frameStart")
+    step = int(body.get("step", 1))
+    if step < 1:
+        raise InvalidInputError("step must be >= 1")
+
+    bake_types = body.get("bakeTypes")
+    if not bake_types:
+        bake_types = ["POSE"] if obj.type == "ARMATURE" else ["OBJECT"]
+    bake_types_set = set(bake_types)
+    invalid = bake_types_set - {"POSE", "OBJECT"}
+    if invalid:
+        raise InvalidInputError(f"bakeTypes invalid: {invalid}")
+
+    only_selected = bool(body.get("onlySelectedBones", False))
+    visual_keying = bool(body.get("visualKeying", True))
+    clear_constraints = bool(body.get("clearConstraints", False))
+    clear_parents = bool(body.get("clearParents", False))
+    use_current_action = bool(body.get("useCurrentAction", False))
+
+    with composite_undo(f"anim_bake_action:{obj.name}"):
+        set_active_and_selected(obj)
+        with with_mode(obj, "POSE" if obj.type == "ARMATURE" else "OBJECT"):
+            with with_3dview_context():
+                # Select all pose bones if we are baking pose and not restricting
+                if obj.type == "ARMATURE" and not only_selected:
+                    try:
+                        bpy.ops.pose.select_all(action="SELECT")
+                    except RuntimeError:
+                        pass
+                try:
+                    bpy.ops.nla.bake(
+                        frame_start=frame_start,
+                        frame_end=frame_end,
+                        step=step,
+                        only_selected=only_selected,
+                        visual_keying=visual_keying,
+                        clear_constraints=clear_constraints,
+                        clear_parents=clear_parents,
+                        use_current_action=use_current_action,
+                        bake_types=bake_types_set,
+                    )
+                except (RuntimeError, TypeError) as exc:
+                    raise InvalidInputError(f"nla.bake failed: {exc}") from exc
+
+    act = obj.animation_data.action if obj.animation_data else None
+    if act is None:
+        raise InvalidInputError("bake completed but no active action attached")
+
+    fcurve_count = _action_fcurve_count(act)
+    return {
+        "ok": True,
+        "data": {
+            "objectName": obj.name,
+            "actionName": act.name,
+            "frameStart": frame_start,
+            "frameEnd": frame_end,
+            "step": step,
+            "bakeTypes": sorted(bake_types_set),
+            "keyedFcurveCount": fcurve_count,
+        },
+        "refs": {"objectName": obj.name, "actionName": act.name},
+    }
+
+
+@handler("POST", "/fcurve/list")
+def fcurve_list(body: dict[str, Any]) -> dict[str, Any]:
+    """List every fcurve on an action with metadata.
+
+    Body: {actionName: str, dataPathFilter?: str (substring), includeKeyframes?: bool}
+    Returns: { fcurves: [{dataPath, arrayIndex, keyframeCount, interpolations,
+                          frameMin, frameMax, valueMin, valueMax, modifiers}] }
+    """
+    act = get_action(body.get("actionName"))
+    dp_filter = body.get("dataPathFilter") or ""
+    include_kp = bool(body.get("includeKeyframes", False))
+    out: list[dict[str, Any]] = []
+    for _container, fc in _iter_channelbag_fcurves(act):
+        dp = fc.data_path or ""
+        if dp_filter and dp_filter not in dp:
+            continue
+        kps = list(fc.keyframe_points)
+        interpolations: list[str] = []
+        for k in kps:
+            interpolations.append(getattr(k, "interpolation", ""))
+        frames = [k.co[0] for k in kps]
+        values = [k.co[1] for k in kps]
+        mods: list[str] = []
+        for m in getattr(fc, "modifiers", []) or []:
+            mods.append(getattr(m, "type", ""))
+        entry: dict[str, Any] = {
+            "dataPath": dp,
+            "arrayIndex": int(fc.array_index),
+            "keyframeCount": len(kps),
+            "interpolationTypes": sorted(set(interpolations)),
+            "frameMin": min(frames) if frames else None,
+            "frameMax": max(frames) if frames else None,
+            "valueMin": min(values) if values else None,
+            "valueMax": max(values) if values else None,
+            "modifiers": mods,
+        }
+        if include_kp:
+            entry["keyframes"] = [
+                {
+                    "frame": float(k.co[0]),
+                    "value": float(k.co[1]),
+                    "interpolation": getattr(k, "interpolation", ""),
+                    "easing": getattr(k, "easing", ""),
+                }
+                for k in kps
+            ]
+        out.append(entry)
+    return {
+        "ok": True,
+        "data": {"actionName": act.name, "count": len(out), "fcurves": out},
+        "refs": {"actionName": act.name},
+    }
+
+
+@handler("POST", "/fcurve/evaluate")
+def fcurve_evaluate(body: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate one or more fcurves at given frames. Useful for validation.
+
+    Body: { actionName: str,
+            dataPath: str,
+            arrayIndex?: int (default 0),
+            frames: [float, ...] }
+    Returns: { samples: [{frame, value}] }
+    """
+    act = get_action(body.get("actionName"))
+    dp = body.get("dataPath")
+    if not dp:
+        raise InvalidInputError("dataPath is required")
+    array_index = int(body.get("arrayIndex", 0))
+    frames = body.get("frames")
+    if not frames:
+        raise InvalidInputError("frames is required (non-empty list)")
+
+    target_fc = None
+    for _container, fc in _iter_channelbag_fcurves(act):
+        if (fc.data_path or "") == dp and int(fc.array_index) == array_index:
+            target_fc = fc
+            break
+    if target_fc is None:
+        raise InvalidInputError(
+            f"no fcurve matching data_path={dp!r} array_index={array_index} on action {act.name!r}"
+        )
+
+    samples = [
+        {"frame": float(f), "value": float(target_fc.evaluate(float(f)))}
+        for f in frames
+    ]
+    return {
+        "ok": True,
+        "data": {
+            "actionName": act.name,
+            "dataPath": dp,
+            "arrayIndex": array_index,
+            "samples": samples,
+        },
+    }
+
+
+@handler("POST", "/keyframe/set_interpolation")
+def keyframe_set_interpolation(body: dict[str, Any]) -> dict[str, Any]:
+    """Set interpolation / easing / handle types on fcurve keyframes.
+
+    Body: {
+      actionName: str,
+      dataPathFilter?: str,        # substring match on fcurve.data_path
+      arrayIndex?: int,            # restrict to this array index
+      frameStart?: float,          # only keys at frame >= this
+      frameEnd?: float,            # only keys at frame <= this
+      interpolation?: str,         # 'BEZIER'|'LINEAR'|'CONSTANT'|'SINE'|...|'ELASTIC'
+      easing?: str,                # 'AUTO'|'EASE_IN'|'EASE_OUT'|'EASE_IN_OUT'
+      handleLeft?: str,            # 'FREE'|'ALIGNED'|'VECTOR'|'AUTO'|'AUTO_CLAMPED'
+      handleRight?: str,
+    }
+    Returns: { affectedCount }
+    """
+    act = get_action(body.get("actionName"))
+    dp_filter = body.get("dataPathFilter") or ""
+    array_index = body.get("arrayIndex")
+    frame_start = body.get("frameStart")
+    frame_end = body.get("frameEnd")
+    interp = body.get("interpolation")
+    easing = body.get("easing")
+    h_left = body.get("handleLeft")
+    h_right = body.get("handleRight")
+
+    if interp is not None and interp not in _INTERPOLATION_TYPES:
+        raise InvalidInputError(f"interpolation {interp!r} not in {sorted(_INTERPOLATION_TYPES)}")
+    if easing is not None and easing not in _EASING_TYPES:
+        raise InvalidInputError(f"easing {easing!r} not in {sorted(_EASING_TYPES)}")
+    for hh in (h_left, h_right):
+        if hh is not None and hh not in _HANDLE_TYPES:
+            raise InvalidInputError(f"handle type {hh!r} not in {sorted(_HANDLE_TYPES)}")
+
+    affected = 0
+    with composite_undo(f"keyframe_set_interpolation:{act.name}"):
+        for _container, fc in _iter_channelbag_fcurves(act):
+            if dp_filter and dp_filter not in (fc.data_path or ""):
+                continue
+            if array_index is not None and int(fc.array_index) != int(array_index):
+                continue
+            for k in fc.keyframe_points:
+                f = float(k.co[0])
+                if frame_start is not None and f < float(frame_start):
+                    continue
+                if frame_end is not None and f > float(frame_end):
+                    continue
+                if interp is not None:
+                    k.interpolation = interp
+                if easing is not None:
+                    k.easing = easing
+                if h_left is not None:
+                    k.handle_left_type = h_left
+                if h_right is not None:
+                    k.handle_right_type = h_right
+                affected += 1
+            fc.update()
+
+    return {
+        "ok": True,
+        "data": {"actionName": act.name, "affectedCount": affected},
+        "refs": {"actionName": act.name},
+    }
+
+
+_FCURVE_MODIFIER_TYPES = {
+    "GENERATOR", "FNGENERATOR", "ENVELOPE", "CYCLES",
+    "NOISE", "LIMITS", "STEPPED",
+}
+
+
+@handler("POST", "/fcurve/add_modifier")
+def fcurve_add_modifier(body: dict[str, Any]) -> dict[str, Any]:
+    """Add an fcurve modifier (CYCLES / NOISE / GENERATOR / etc.) to one or
+    more fcurves of an action.
+
+    Body: {
+      actionName: str,
+      type: str,                   # one of CYCLES, NOISE, GENERATOR, ...
+      dataPathFilter?: str,        # substring match (default = all)
+      arrayIndex?: int,
+      params?: dict                # forwarded to modifier as setattr(k, v)
+    }
+    Returns: { addedCount, type }
+    """
+    act = get_action(body.get("actionName"))
+    m_type = body.get("type")
+    if not m_type:
+        raise InvalidInputError("type is required")
+    if m_type not in _FCURVE_MODIFIER_TYPES:
+        raise InvalidInputError(f"type {m_type!r} not in {sorted(_FCURVE_MODIFIER_TYPES)}")
+    dp_filter = body.get("dataPathFilter") or ""
+    array_index = body.get("arrayIndex")
+    params = body.get("params") or {}
+
+    added = 0
+    with composite_undo(f"fcurve_add_modifier:{act.name}/{m_type}"):
+        for _container, fc in _iter_channelbag_fcurves(act):
+            if dp_filter and dp_filter not in (fc.data_path or ""):
+                continue
+            if array_index is not None and int(fc.array_index) != int(array_index):
+                continue
+            try:
+                m = fc.modifiers.new(type=m_type)
+            except (RuntimeError, TypeError) as exc:
+                raise InvalidInputError(
+                    f"modifiers.new(type={m_type!r}) failed: {exc}"
+                ) from exc
+            for k, v in params.items():
+                if hasattr(m, k):
+                    try:
+                        setattr(m, k, v)
+                    except (TypeError, AttributeError):
+                        pass
+            added += 1
+            fc.update()
+
+    return {
+        "ok": True,
+        "data": {"actionName": act.name, "type": m_type, "addedCount": added},
+        "refs": {"actionName": act.name},
+    }
+
+
+@handler("POST", "/action/duplicate")
+def action_duplicate(body: dict[str, Any]) -> dict[str, Any]:
+    """Deep-copy an action with a new name. Uses bpy's built-in `.copy()` which
+    handles both legacy and layered fcurves.
+
+    Body: { actionName: str, newName: str }
+    """
+    import bpy  # type: ignore
+
+    src = get_action(body.get("actionName"))
+    new_name = body.get("newName")
+    if not new_name:
+        raise InvalidInputError("newName is required")
+    if new_name in bpy.data.actions:
+        raise InvalidInputError(f"action {new_name!r} already exists")
+    with composite_undo(f"action_duplicate:{src.name}->{new_name}"):
+        dup = src.copy()
+        dup.name = new_name
+    return {
+        "ok": True,
+        "data": {
+            "sourceActionName": src.name,
+            "newActionName": dup.name,
+            "fcurveCount": _action_fcurve_count(dup),
+        },
+        "refs": {"actionName": dup.name},
+    }
+
+
+# ----------------------------------------------------------------------------
+# NLA editing
+# ----------------------------------------------------------------------------
+
+
+@handler("POST", "/nla/track_add")
+def nla_track_add(body: dict[str, Any]) -> dict[str, Any]:
+    """Create a new NLA track on an object. Returns the track name (Blender
+    auto-suffixes on collision)."""
+    obj = get_object(body.get("objectName"))
+    track_name = body.get("trackName") or "NlaTrack"
+    if obj.animation_data is None:
+        obj.animation_data_create()
+    with composite_undo(f"nla_track_add:{obj.name}/{track_name}"):
+        track = obj.animation_data.nla_tracks.new()
+        track.name = track_name
+    return {
+        "ok": True,
+        "data": {"objectName": obj.name, "trackName": track.name},
+        "refs": {"objectName": obj.name, "trackName": track.name},
+    }
+
+
+@handler("POST", "/nla/list")
+def nla_list(body: dict[str, Any]) -> dict[str, Any]:
+    """List every NLA track + its strips for an object."""
+    obj = get_object(body.get("objectName"))
+    ad = obj.animation_data
+    if ad is None:
+        return {
+            "ok": True,
+            "data": {"objectName": obj.name, "trackCount": 0, "tracks": []},
+            "refs": {"objectName": obj.name},
+        }
+    tracks: list[dict[str, Any]] = []
+    for t in ad.nla_tracks:
+        strips = []
+        for s in t.strips:
+            strips.append({
+                "name": s.name,
+                "actionName": s.action.name if s.action else None,
+                "frameStart": float(s.frame_start),
+                "frameEnd": float(s.frame_end),
+                "blendType": getattr(s, "blend_type", ""),
+                "extrapolation": getattr(s, "extrapolation", ""),
+                "mute": bool(s.mute),
+                "influence": float(getattr(s, "influence", 1.0)),
+            })
+        tracks.append({
+            "name": t.name,
+            "mute": bool(t.mute),
+            "isSolo": bool(getattr(t, "is_solo", False)),
+            "strips": strips,
+        })
+    return {
+        "ok": True,
+        "data": {"objectName": obj.name, "trackCount": len(tracks), "tracks": tracks},
+        "refs": {"objectName": obj.name},
+    }
+
+
+@handler("POST", "/nla/strip_remove")
+def nla_strip_remove(body: dict[str, Any]) -> dict[str, Any]:
+    """Remove a strip from an NLA track by name. Idempotent on absence."""
+    obj = get_object(body.get("objectName"))
+    track_name = body.get("trackName")
+    strip_name = body.get("stripName")
+    if not (track_name and strip_name):
+        raise InvalidInputError("trackName and stripName are required")
+    ad = obj.animation_data
+    if ad is None:
+        return {"ok": True, "data": {"removed": False}}
+    track = ad.nla_tracks.get(track_name)
+    if track is None:
+        return {"ok": True, "data": {"removed": False}}
+    strip = track.strips.get(strip_name)
+    removed = False
+    if strip is not None:
+        with composite_undo(f"nla_strip_remove:{obj.name}/{track_name}/{strip_name}"):
+            track.strips.remove(strip)
+            removed = True
+    return {
+        "ok": True,
+        "data": {
+            "objectName": obj.name,
+            "trackName": track_name,
+            "stripName": strip_name,
+            "removed": removed,
+        },
+    }
+
+
+_NLA_BLEND_TYPES = {"REPLACE", "COMBINE", "ADD", "SUBTRACT", "MULTIPLY"}
+_NLA_EXTRAPOLATION_TYPES = {"NOTHING", "HOLD", "HOLD_FORWARD"}
+
+
+@handler("POST", "/nla/strip_update")
+def nla_strip_update(body: dict[str, Any]) -> dict[str, Any]:
+    """Mutate a strip in place: blend mode, mute, influence, frame range."""
+    obj = get_object(body.get("objectName"))
+    track_name = body.get("trackName")
+    strip_name = body.get("stripName")
+    if not (track_name and strip_name):
+        raise InvalidInputError("trackName and stripName are required")
+    ad = obj.animation_data
+    if ad is None or track_name not in ad.nla_tracks:
+        raise InvalidInputError(f"track {track_name!r} not found on {obj.name!r}")
+    track = ad.nla_tracks[track_name]
+    strip = track.strips.get(strip_name)
+    if strip is None:
+        raise InvalidInputError(f"strip {strip_name!r} not found on track {track_name!r}")
+
+    bt = body.get("blendType")
+    if bt is not None and bt not in _NLA_BLEND_TYPES:
+        raise InvalidInputError(f"blendType {bt!r} not in {sorted(_NLA_BLEND_TYPES)}")
+    ex = body.get("extrapolation")
+    if ex is not None and ex not in _NLA_EXTRAPOLATION_TYPES:
+        raise InvalidInputError(f"extrapolation {ex!r} not in {sorted(_NLA_EXTRAPOLATION_TYPES)}")
+
+    with composite_undo(f"nla_strip_update:{obj.name}/{track_name}/{strip_name}"):
+        if bt is not None:
+            strip.blend_type = bt
+        if ex is not None:
+            strip.extrapolation = ex
+        if "mute" in body:
+            strip.mute = bool(body["mute"])
+        if "influence" in body:
+            strip.influence = float(body["influence"])
+        if "frameStart" in body:
+            strip.frame_start = float(body["frameStart"])
+        if "frameEnd" in body:
+            strip.frame_end = float(body["frameEnd"])
+
+    return {
+        "ok": True,
+        "data": {
+            "objectName": obj.name,
+            "trackName": track_name,
+            "stripName": strip_name,
+            "blendType": strip.blend_type,
+            "extrapolation": strip.extrapolation,
+            "mute": bool(strip.mute),
+            "influence": float(strip.influence),
+            "frameStart": float(strip.frame_start),
+            "frameEnd": float(strip.frame_end),
+        },
+        "refs": {"objectName": obj.name, "trackName": track_name, "stripName": strip_name},
+    }
+
