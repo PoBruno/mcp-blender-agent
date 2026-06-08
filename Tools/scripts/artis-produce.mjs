@@ -285,7 +285,11 @@ async function main() {
       actionName: "AimOffset_Char",
       spineBoneName: "spine_02",
       neckBoneName: "neck_01",
-      headBoneName: "head_01",
+      // IMPORTANT: head_01 is a SIBLING of jaw_01 / eye_* / eyebrow_* under
+      // neck_02 in this rig — rotating head_01 alone tears the face apart.
+      // Drive neck_02 instead so the entire head (face + eyes + jaw + hair)
+      // rotates as one rigid block. head_01's mesh follows through the chain.
+      headBoneName: "neck_02",
       yawWeights: [0.15, 0.20, 0.65],
       pitchWeights: [0.00, 0.00, 1.00],
       yawDegMax: 90,
@@ -301,7 +305,7 @@ async function main() {
     () => blenderPost("/aim_offset/validate_9_pose_matrix", {
       armatureObjectName: armName,
       actionName: "AimOffset_Char",
-      probeBoneName: "head_01",
+      probeBoneName: "neck_02",
       yawDegMax: 90,
       pitchDegMax: 45,
       frameStart: 1,
@@ -354,7 +358,12 @@ async function main() {
     log(`> reusing existing camera: ${camName}`);
   }
 
-  // 9a — front render of the character (bind pose)
+  // 9a — front render of the character IN BIND POSE (no animation evaluated).
+  // Setting the armature to REST mode bypasses every action AND every NLA
+  // strip — the only reliable way to render the imported bind pose once the
+  // rig has strips attached. We restore POSE mode immediately after.
+  await step("/armature/set_pose_position REST (bind pose render)",
+    () => blenderPost("/armature/set_pose_position", { armatureObjectName: armName, mode: "REST" }));
   await step("/camera/frame_object front (rig)",
     () => blenderPost("/camera/frame_object", {
       cameraObjectName: camName,
@@ -367,17 +376,24 @@ async function main() {
   const valFront = join(DELIVERY, "validation_front.png");
   await step("/render/render_still → validation_front.png",
     () => blenderPost("/render/render_still", { filepath: valFront, fileFormat: "PNG" }));
+  // Restore POSE so the aim-grid renders can evaluate AimOffset_Char.
+  await step("/armature/set_pose_position POSE (restore)",
+    () => blenderPost("/armature/set_pose_position", { armatureObjectName: armName, mode: "POSE" }));
 
-  // 9b — 3x3 grid of AimOffset poses: render frames 1..9 individually
-  // (compositing into one image is a follow-up; for now we emit 9 separate PNGs
-  // into a subfolder so the artist can flip through them or build a contact sheet)
+  // 9b — 3x3 grid of AimOffset poses.
+  // Camera is framed ONCE on the bind pose then LOCKED — every pose render uses
+  // the same viewpoint so the artist can directly compare head positions.
+  // We use a head-height eye-level shot from slightly above so yaw + pitch are
+  // both legible in 2D.
   const aimDir = join(DELIVERY, "validation_aim_poses");
   mkdirSync(aimDir, { recursive: true });
-  // Assign AimOffset_Char so we render the right action
   await step("/action/assign_to_object AimOffset_Char (for grid)",
     () => blenderPost("/action/assign_to_object", { objectName: armName, actionName: "AimOffset_Char" }));
-  // Frame from a slight front_top angle to see head rotation
-  await step("/camera/frame_object front_top (aim preview)",
+  // Frame ONCE on the neutral pose 5 (identity rotation) — this is the camera
+  // for ALL nine pose renders.
+  await step("/scene/set_frame_range frame 5 (neutral) for camera framing",
+    () => blenderPost("/scene/set_frame_range", { frameCurrent: 5 }));
+  await step("/camera/frame_object front_top (aim preview, locked)",
     () => blenderPost("/camera/frame_object", {
       cameraObjectName: camName,
       targetObjectName: armName,
