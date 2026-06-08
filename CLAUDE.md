@@ -12,7 +12,7 @@ Sister project: [PoBruno/mcp-unreal-agent](https://github.com/PoBruno/mcp-unreal
 
 Two processes:
 
-- **`BlenderAgent` Python addon** — runs inside Blender (or as headless `blender --background`). Hosts an HTTP server on port `9876`. Calls `bpy.data`, `bpy.ops`, `bmesh`, `mathutils` directly. **No build step** — distributed as a zipped folder you install through Blender's Add-ons preferences.
+- **`BlenderAgent` Python addon** — runs inside Blender (or as headless `blender --background`). Hosts an HTTP server on port `9877` by default (different from the popular `blender-mcp` plugin on 9876 — the two coexist). Calls `bpy.data`, `bpy.ops`, `bmesh`, `mathutils` directly. **No build step** — distributed as a zipped folder you install through Blender's Add-ons preferences.
 - **`blender-agent` TypeScript MCP server** — translates MCP tool calls from agents into HTTP calls to the addon. Ships ~140 tools across 12 domains at v1.0.
 
 Two serving modes:
@@ -28,13 +28,13 @@ Agents call tools like `object_create`, `bone_add`, `material_assign_slot`, `sha
 
 | Layer | Tech |
 |---|---|
-| Blender | 4.2 LTS or newer (no 3.x support) |
+| Blender | 4.2 LTS or newer; 5.x recommended (tested on 5.1.2). No 3.x support. |
 | Addon language | Python 3.11+ (Blender's embedded interpreter) — `bpy`, `bmesh`, `mathutils` |
 | HTTP server | `http.server` in a background `threading.Thread`, drained on the main thread via `bpy.app.timers.register(drain, persistent=True)` |
 | MCP server | TypeScript on Node.js 18+, `@modelcontextprotocol/sdk` v1.12+ |
 | Schema validation | Zod |
 | Tests | Vitest with a self-bootstrapping `blender --background` harness |
-| Bridge | HTTP localhost:9876 (JSON in, JSON out) |
+| Bridge | HTTP localhost:9877 (JSON in, JSON out) |
 | Distribution | TS server via npm; addon as `BlenderAgent.zip` from GitHub Releases |
 
 ---
@@ -47,7 +47,7 @@ Agents call tools like `object_create`, `bone_add`, `material_assign_slot`, `sha
 4. **Main-thread marshalling.** `bpy` is **not thread-safe**. The HTTP server runs on a background thread, enqueues a callable, then blocks on a `threading.Event` until the `bpy.app.timers` drain on the main thread executes it and posts the result. **Never call `bpy.*` from the HTTP thread directly.**
 5. **Mode-aware mutations.** Mesh edits switch to Edit Mode, armature edits to Edit/Pose Mode, restore on exit. Idempotent — entering a mode you're already in is a no-op.
 6. **Snapshots, not binary diffs.** `.blend` is binary; never try to diff it. Use structured JSON snapshots for graphs and scenes.
-7. **Headless is the fallback, not the default.** If Blender is open, the TS server detects it (probe `GET /server/status` on port `9876`) and never spawns a duplicate.
+7. **Headless is the fallback, not the default.** If Blender is open, the TS server detects it (probe `GET /server/status` on port `9877`) and never spawns a duplicate.
 8. **Dual harness, single source of truth.** All conventions live in `CLAUDE.md` and `.claude/`. The `.github/copilot-instructions.md` is a thin bridge that re-exports them. No drift allowed.
 
 ---
@@ -101,7 +101,7 @@ These apply in every conversation without invoking a command.
 - Operators that need 3D-View context wrap in `bpy.context.temp_override(...)`.
 - Mode switches are bracketed (enter, mutate, restore).
 - Composite mutations end with **one** `bpy.ops.ed.undo_push(message=...)`.
-- Never use deprecated 2.7x-style APIs. Lock on Blender 4.2 LTS+.
+- Never use deprecated 2.7x-style APIs. Lock on Blender 4.2 LTS+ (5.x recommended).
 - Errors propagate as Python exceptions — caught at the handler boundary and converted to `{ ok: false, errorCode: ... }`.
 
 **When touching TypeScript MCP server code:**
@@ -231,7 +231,7 @@ Headless Blender requirement: `blender` on `PATH` or `BLENDER_BIN` env var point
     "blender-agent": {
       "command": "node",
       "args": ["./node_modules/@pobruno/blender-agent/dist/index.js"],
-      "env": { "BLENDER_PORT": "9876" }
+      "env": { "BLENDER_PORT": "9877" }
     }
   }
 }
@@ -246,7 +246,7 @@ Headless Blender requirement: `blender` on `PATH` or `BLENDER_BIN` env var point
       "blender-agent": {
         "command": "node",
         "args": ["./node_modules/@pobruno/blender-agent/dist/index.js"],
-        "env": { "BLENDER_PORT": "9876" }
+        "env": { "BLENDER_PORT": "9877" }
       }
     }
   }

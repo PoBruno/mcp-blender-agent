@@ -27,7 +27,7 @@ The agent should be able to describe a low-poly character — bones, weights, so
 
 Two parts, mirroring `mcp-unreal-agent`:
 
-- **`BlenderAgent/` — Python addon** that lives inside Blender (or runs headless via `blender --background`). Hosts an HTTP server on port `9876`. Calls `bpy.data`, `bpy.ops`, `bmesh`, `mathutils` directly. No build step.
+- **`BlenderAgent/` — Python addon** that lives inside Blender (or runs headless via `blender --background`). Hosts an HTTP server on port `9877` (different from the dominant `blender-mcp` plugin on 9876 — they coexist). Calls `bpy.data`, `bpy.ops`, `bmesh`, `mathutils` directly. No build step.
 - **`Tools/` — TypeScript MCP server.** Translates MCP tool calls from the agent into HTTP calls to the addon. Ships the structured tool contract, ID-chain, error registry, install brain, and passive context skill.
 
 Two serving modes:
@@ -39,19 +39,22 @@ Two serving modes:
 
 ## Status
 
-🚧 **Phase 0 — bootstrap.** Harness in place, no tools implemented yet. See [ROADMAP.md](ROADMAP.md) and [OBJECTIVES.md](OBJECTIVES.md).
+� **Sprints 0–5 scaffold landed.** Addon (35 handler modules), TS server (16 tool files, ~140 tools), 12 tool integration tests + 3 recipe tests, install harness, CI matrix for ubuntu/windows/macos. Build is green; full validation on first CI run. See [.claude/docs/SPRINTS.md](.claude/docs/SPRINTS.md) for the per-task done log.
 
 ---
 
-## Quick start (for now: developers only)
+## Quick start
 
 ```powershell
 git clone https://github.com/PoBruno/mcp-blender-agent.git
-cd mcp-blender-agent
-# Phase 0: nothing to run yet. Open in VS Code and follow CLAUDE.md / .github/copilot-instructions.md.
+cd mcp-blender-agent/Tools
+npm install
+npm run build
+# Need Blender 4.2 LTS or newer (5.x recommended) on PATH (or BLENDER_BIN) to run the integration tests:
+npm test
 ```
 
-End-user install playbook ([install/AGENT-INSTALL.md](install/AGENT-INSTALL.md)) ships with Phase 5.
+End-user install playbook: [install/INSTALL.md](install/INSTALL.md). Agent-driven install: [install/AGENT-INSTALL.md](install/AGENT-INSTALL.md). Copy-paste prompts: [install/PROMPT-TEMPLATES.md](install/PROMPT-TEMPLATES.md).
 
 ---
 

@@ -37,7 +37,7 @@ Every MCP tool returns `{ ok, data, refs, nextSteps, warnings, errorCode }`. Rea
 
 ## 7. Tests are mandatory
 
-Every new tool ships with an integration test in `Tools/test/tools/`. CI runs against Blender 4.2 LTS on Windows + macOS + Linux. Red CI = not merged.
+Every new tool ships with an integration test in `Tools/test/tools/`. CI runs against Blender 4.2 LTS on Windows + macOS + Linux (locally tested on 5.x). Red CI = not merged.
 
 ## 8. PRs
 

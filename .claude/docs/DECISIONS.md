@@ -172,3 +172,151 @@ Format per ADR:
 
 **Consequences:**
 - Some good ideas in `ref/` need explicit re-implementation. Worth it.
+
+---
+
+## ADR-008: `exec_python` is opt-in behind `BLENDER_AGENT_ALLOW_EXEC=1`
+
+**Status:** Accepted (research phase).
+
+**Context:** A `exec_python(code: str)` tool is trivial to ship and pseudo-solves "what if my tool list doesn't cover this?" It also opens an arbitrary code-execution path that a compromised or hallucinating model can abuse — wiping `bpy.data`, exfiltrating files, modifying `~/.config`, etc.
+
+**Decision:** Ship `exec_python` and `get_python_console_output` **only when** the addon process sees `BLENDER_AGENT_ALLOW_EXEC=1`. By default the tools refuse to register, returning `errorCode: EXEC_PYTHON_DISABLED` if called. Same gate covers free-text driver expressions in `shape_key_add_driver` / `driver_add_*` (otherwise restricted to templated expressions like `var * 0.5`).
+
+**Rationale:**
+- Default-safe. A fresh install can't run arbitrary code.
+- Power user opt-in for one-off scripts or research workflows.
+- The flag is visible in `server_status` output so the agent can detect and adapt.
+
+**Alternatives considered:**
+- **Always-on** — unacceptable for an MCP server meant to be installed broadly.
+- **Always-off** — too restrictive; some workflows genuinely need it.
+- **Capability list in env** (`BLENDER_AGENT_ALLOW=exec_python,free_drivers`) — over-engineered for two related capabilities.
+
+**Consequences:**
+- The 228-tool catalog has one tool (`exec_python`) that v1.0 ships behind a flag. Documented in [TOOL-CATALOG.md §B9.E](research/TOOL-CATALOG.md) and [BPY-FEASIBILITY.md §2 row 14](research/BPY-FEASIBILITY.md).
+
+---
+
+## ADR-009: MetaHuman face — ARKit-52 in v1.0, full FACS DNA rig deferred to v1.1+
+
+**Status:** Accepted (research phase).
+
+**Context:** "MetaHuman face support" can mean two very different things:
+1. The 52 ARKit blendshapes (Apple's spec) on a mesh, driven by drivers or Live Link Face. Trivially doable in `bpy`.
+2. The full ~400-joint DNA face rig with RBF solvers, lip sync, and skin sliding. Authored in Maya/Houdini via Epic's `MetaHuman for Maya` plugin; no native Blender path exists.
+
+**Decision:** v1.0 ships **ARKit-52 only** via `shape_key_create_arkit_set` + `shape_key_add_driver` + `metahuman_face_validate`. Full DNA rig is a v1.1+ investigation, possibly via external subprocess (`MetaHumanCreator` or DCC plugin bridge).
+
+**Rationale:**
+- Apple's ARKit-52 is the cross-platform face standard. UE5 Live Link Face writes to ARKit names. MetaHuman Animator accepts ARKit input.
+- ARKit-52 covers 90% of game-character facial animation needs.
+- Full DNA is research-grade work that would consume an entire sprint with uncertain feasibility.
+
+**Alternatives considered:**
+- **Ship nothing for v1.0** — leaves a glaring gap for the character pipeline.
+- **Ship a half-built DNA rig** — would set false expectations.
+
+**Consequences:**
+- Marketing copy for v1.0 says "MetaHuman-compatible (ARKit-52)", not "full MetaHuman rig".
+- `metahuman_face_validate` exists to prevent users from shipping incomplete face meshes.
+
+---
+
+## ADR-010: Sculpt boundary — agent ships deterministic ops + setup, not freehand strokes
+
+**Status:** Accepted (research phase).
+
+**Context:** Sculpting in Blender mixes deterministic ops (voxel remesh, symmetrize, masks, filters) with inherently modal ones (the brush stroke itself — needs live mouse events). The agent can't realistically replay a freehand sculpt session.
+
+**Decision:** Ship the deterministic sculpt subset (`sculpt_remesh_voxel`, `sculpt_symmetrize`, `sculpt_filter_apply`, `sculpt_mask_create_from_cavity`, `sculpt_set_brush_param`, `sculpt_mode_toggle`, `sculpt_brush_stroke_deterministic` — the last replays a recorded stroke list, feasibility verified in 4.2). Do **not** ship a freehand "draw a stroke" tool. Polybuild retopo also stays modal — ship `retopo_create_base_cage` (Shrinkwrap-based) and `bmesh`-driven manual topo build.
+
+**Rationale:**
+- Determinism is non-negotiable for an agent tool. Modal brush strokes are not deterministic.
+- The split aligns with what an artist actually does: "set up the scene + bake deterministic ops" is agent work; "express creative intent through brush strokes" is human work.
+- Texture painting is the same pattern: agent sets up materials and bakes (B4); painting strokes stay human.
+
+**Alternatives considered:**
+- **Ship a `sculpt_freehand_stroke` taking screenshots and predicted mouse coords** — fragile, slow, non-deterministic.
+- **Ship nothing for sculpt** — would block the character pipeline.
+
+**Consequences:**
+- v1.0 supports a "sculpt + verify" flow but not a "sculpt from scratch via agent" flow.
+- Documented in [BPY-FEASIBILITY.md §2 rows 1, 3, 4](research/BPY-FEASIBILITY.md).
+
+---
+
+## ADR-011: Library Override — primitives only; conflict resolution stays human
+
+**Status:** Accepted (research phase).
+
+**Context:** Blender's Library Override system lets a linked datablock be locally edited. Upstream changes can break the override — Blender's resync logic helps but is imperfect, and conflict resolution genuinely needs the user's judgement.
+
+**Decision:** Ship `library_link`, `library_make_override`, `library_resync`, `library_make_local` as primitives. **Do not** ship a composite that tries to auto-resolve override conflicts. The agent's role is to set up overrides and surface resync results; conflict resolution is the user's.
+
+**Rationale:**
+- Override conflicts are semantic. Asking an LLM to resolve "your animation says elbow_l should be at 30°, but upstream rig says 45°" is asking for hallucinated decisions.
+- The 4 primitives cover ~95% of override workflows (cinematic ingest, character lib reuse).
+- Asset Browser publishing is also UI-driven; v1.0 ships `asset_mark` / `asset_unmark` data tools but no browser interaction.
+
+**Alternatives considered:**
+- **Skip override entirely** — blocks cinematic and library-reuse workflows.
+- **Ship auto-resolver** — would silently corrupt user data.
+
+**Consequences:**
+- Cinematic pipelines that need library overrides work; complex conflicts surface to the user.
+- Documented in [BPY-FEASIBILITY.md §3.6](research/BPY-FEASIBILITY.md).
+
+---
+
+## ADR-012: Tool layering — pipeline-organized + canonical owner + cross-references
+
+**Status:** Accepted (research phase).
+
+**Context:** ~228 tools across 9 pipelines, with some tools (`export_fbx_static`, `uv_smart_project`, `shape_key_create_arkit_set`, `scene_create`, `collection_create`, `view_layer_create`) appearing in multiple pipelines' research notes. We need one place each tool lives.
+
+**Decision:** Each tool has exactly one **canonical owner pipeline** — the file that defines its handler under `BlenderAgent/handlers/<domain>.py` and registration under `Tools/src/tools/<domain>.ts`. Other pipelines that use it cross-reference back via the alias map in [TOOL-CATALOG.md §"Cross-pipeline alias map"](research/TOOL-CATALOG.md).
+
+The 9 pipelines (B1..B9) map to the 12-domain phase structure of [ROADMAP.md](../../ROADMAP.md) as follows:
+
+| Pipeline | Phase | Notes |
+|---|---|---|
+| B1 Environment kits | P1 + P4 | Scene/object/collection (P1) + export (P4) |
+| B2 Hard-surface props | P2 + P4 | Modifier/mesh edit (P2) + export (P4) |
+| B3 Organic / character | P2 | Sculpt + rig prep |
+| B4 UV + bake | P3 | UV + texture pipeline |
+| B5 Materials / shaders | P3 | Material + shader node |
+| B6 Geometry Nodes + Compositor | P3 | GN + compositor |
+| B7 Rigging + MetaHuman face | P2 | Armature + bone + shape keys |
+| B8 Animation + export | P2 + P4 | Animation auth (P2) + export (P4) |
+| B9 Lighting / camera / render / scene / file | P4 + P5 | Render (P4) + file IO (P5) |
+
+**Rationale:**
+- Avoids duplicate handler registration (each `@handler("POST", "/object/create")` must be unique).
+- Single source of truth per tool. The research files are organized by *artist workflow*; the codebase is organized by *Blender data domain*. The alias map bridges the two.
+
+**Alternatives considered:**
+- **One tool file per pipeline** — would lead to duplicate handler registrations.
+- **Flat single-file registration** — unreadable at 228 tools.
+
+**Consequences:**
+- New-tool authoring procedure: find canonical owner per [TOOL-CATALOG.md](research/TOOL-CATALOG.md) → register there → cross-reference in the consuming pipeline's research file.
+
+---
+
+## ADR-013: Tool count target is ~228, not "~140"
+
+**Status:** Accepted (research phase, supersedes implicit count in ROADMAP.md).
+
+**Context:** [ROADMAP.md](../../ROADMAP.md) and [CLAUDE.md](../../CLAUDE.md) cited "~140 tools at v1.0" as an estimate. The 9-pipeline research surfaced 228 distinct tools — 162 🟢 + 51 🟡 + 15 🔴 (deferred or out-of-scope).
+
+**Decision:** The verified v1.0 target is **~210 tools shipped** (162 green + 48 yellow w/ caveats), with 15 explicitly deferred to v1.1+. The "~140" figure in older docs is superseded — see [TOOL-CATALOG.md](research/TOOL-CATALOG.md) for the canonical count.
+
+**Rationale:**
+- The original 140 estimate predated the pipeline-by-pipeline study. The research surfaced ~88 more tools (mostly composites and per-pipeline export wrappers).
+- Verified count is more useful than an estimate for sprint planning.
+
+**Consequences:**
+- ROADMAP.md "Tools delivered" column updated.
+- Per-sprint task counts re-derive from this.
+- The catalog is the source of truth, not the roadmap.

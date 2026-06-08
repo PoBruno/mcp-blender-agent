@@ -13,7 +13,7 @@ This file exists so that agents which look for `AGENTS.md` by convention land at
 Sister project: [PoBruno/mcp-unreal-agent](https://github.com/PoBruno/mcp-unreal-agent). Same architecture, same contracts, same harness — the Blender twin.
 
 Two parts:
-- **`BlenderAgent` Python addon** at [BlenderAgent/](BlenderAgent/) — runs an HTTP server inside Blender on port `9876`. No build step.
+- **`BlenderAgent` Python addon** at [BlenderAgent/](BlenderAgent/) — runs an HTTP server inside Blender on port `9877`. No build step.
 - **`blender-agent` MCP server** at [Tools/](Tools/) — TypeScript bridge from MCP protocol to addon HTTP.
 
 ## What you need to know to start work
