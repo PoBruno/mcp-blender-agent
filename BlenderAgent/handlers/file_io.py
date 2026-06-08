@@ -9,6 +9,28 @@ from ..helpers import InvalidInputError, composite_undo
 from ..server import handler
 
 
+@handler("POST", "/file/new")
+def file_new(body: dict[str, Any]) -> dict[str, Any]:
+    """Reset the current Blender session to a fresh empty .blend file.
+
+    Body: {empty?: bool}
+      empty=true (default false): start with no default cube/camera/light.
+
+    Calls bpy.ops.wm.read_homefile(use_empty=...) to load the user's startup
+    or a fully empty scene. After this the active .blend has no filepath until
+    /file/save_as is called.
+    """
+    import bpy  # type: ignore
+    empty = bool(body.get("empty", False))
+    bpy.ops.wm.read_homefile(use_empty=empty)
+    return {
+        "ok": True,
+        "data": {"filepath": bpy.data.filepath, "empty": empty,
+                 "sceneName": bpy.context.scene.name},
+        "refs": {"sceneName": bpy.context.scene.name},
+    }
+
+
 @handler("POST", "/file/save")
 def file_save(_body: dict[str, Any]) -> dict[str, Any]:
     import bpy  # type: ignore

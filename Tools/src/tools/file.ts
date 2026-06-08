@@ -10,6 +10,18 @@ import { passthroughPost, registerTools } from "../tool-helpers.js";
 export function registerFileTools(server: McpServer): void {
   registerTools(server, [
     {
+      name: "file_new",
+      description:
+        "Reset the Blender session to a fresh empty .blend (factory startup). Active filepath becomes empty until file_save_as. Use empty=true to skip the default cube/camera/light.",
+      inputSchema: {
+        empty: z
+          .boolean()
+          .optional()
+          .describe("If true, start with no default cube/camera/light (default false)."),
+      },
+      handler: passthroughPost("/file/new"),
+    },
+    {
       name: "file_save",
       description: "Save the current .blend (must have been saved before).",
       inputSchema: {},
