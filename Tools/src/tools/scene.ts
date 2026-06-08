@@ -44,11 +44,17 @@ export function registerSceneTools(server: McpServer): void {
     },
     {
       name: "scene_set_frame_range",
-      description: "Set scene frame_start and frame_end.",
+      description:
+        "Set the scene frame_start, frame_end, and/or frame_current. All three are optional — pass only frameCurrent to step through poses for validation renders.",
       inputSchema: {
         sceneName: z.string().optional().describe("Scene name; default = active."),
-        frameStart: z.number().int().describe("Start frame."),
-        frameEnd: z.number().int().describe("End frame."),
+        frameStart: z.number().int().optional().describe("Start frame."),
+        frameEnd: z.number().int().optional().describe("End frame."),
+        frameCurrent: z
+          .number()
+          .int()
+          .optional()
+          .describe("Set the current frame (uses scene.frame_set so dependencies update)."),
       },
       handler: passthroughPost("/scene/set_frame_range"),
     },

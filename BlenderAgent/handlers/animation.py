@@ -515,16 +515,38 @@ def nla_push_action_to_strip(body: dict[str, Any]) -> dict[str, Any]:
 
 @handler("POST", "/scene/set_frame_range")
 def scene_set_frame_range(body: dict[str, Any]) -> dict[str, Any]:
+    """Set the scene's animation range and/or current frame.
+
+    Body: {sceneName?: str, frameStart?: int, frameEnd?: int, frameCurrent?: int}
+
+    All fields are optional. When only frameCurrent is provided, the start/end
+    range is left untouched — handy for stepping through poses while rendering
+    validation stills. Defaults preserve current values when a field is omitted.
+    """
     import bpy  # type: ignore
     scene_name = body.get("sceneName")
     scene = bpy.data.scenes[scene_name] if scene_name else bpy.context.scene
-    start = int(body.get("frameStart", 1))
-    end = int(body.get("frameEnd", 250))
+    start = body.get("frameStart")
+    end = body.get("frameEnd")
+    cur = body.get("frameCurrent")
+    if start is None and end is None and cur is None:
+        # Back-compat default behaviour
+        start = 1
+        end = 250
     with composite_undo(f"scene_set_frame_range:{scene.name}"):
-        scene.frame_start = start
-        scene.frame_end = end
+        if start is not None:
+            scene.frame_start = int(start)
+        if end is not None:
+            scene.frame_end = int(end)
+        if cur is not None:
+            scene.frame_set(int(cur))
     return {
         "ok": True,
-        "data": {"sceneName": scene.name, "frameStart": start, "frameEnd": end},
+        "data": {
+            "sceneName": scene.name,
+            "frameStart": scene.frame_start,
+            "frameEnd": scene.frame_end,
+            "frameCurrent": scene.frame_current,
+        },
         "refs": {"sceneName": scene.name},
     }
