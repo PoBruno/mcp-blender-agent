@@ -31,6 +31,53 @@ export function registerArmatureTools(server: McpServer): void {
       },
       handler: passthroughPost("/armature/show_in_front"),
     },
+    {
+      name: "armature_add_ue5_ik_bones",
+      description:
+        "Add the 7 UE5 SK_Mannequin IK control bones (ik_foot_root, ik_foot_l/r, ik_hand_root, ik_hand_gun, ik_hand_l/r). Non-deforming by default. Sibling-of-root layout that UE5 auto-detects on import.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        useDeform: z
+          .boolean()
+          .optional()
+          .describe("Mark bones as deforming (default false — they're targets only)."),
+        skipExisting: z
+          .boolean()
+          .optional()
+          .describe("If true, skip bones that already exist (default true)."),
+      },
+      handler: passthroughPost("/armature/add_ue5_ik_bones"),
+    },
+    {
+      name: "armature_validate_ue5_convention",
+      description:
+        "Validate an armature against UE5 SK_Mannequin conventions: lowercase names, _l/_r suffixes (not .L/.R), zero-roll on specified spine/neck/head bones, required bones present. Returns ok=false + errorCode='VALIDATION_FAILED' with a detailed failures[] if any check fails. Pure read; never mutates.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        zeroRollBones: z
+          .array(z.string())
+          .optional()
+          .describe("Bones that MUST have |roll| < tolerance."),
+        rollToleranceRad: z
+          .number()
+          .nonnegative()
+          .optional()
+          .describe("Roll tolerance in radians (default 0.01 ~= 0.57°)."),
+        requireLowercase: z
+          .boolean()
+          .optional()
+          .describe("Reject uppercase characters in bone names (default true)."),
+        requireUnderscoreLR: z
+          .boolean()
+          .optional()
+          .describe("Reject .L/.R suffix; UE5 expects _l/_r (default true)."),
+        requiredBones: z
+          .array(z.string())
+          .optional()
+          .describe("Bone names that MUST exist in the armature."),
+      },
+      handler: passthroughPost("/armature/validate_ue5_convention"),
+    },
   ]);
 }
 
@@ -92,6 +139,65 @@ export function registerBoneTools(server: McpServer): void {
         boneName: z.string().describe("Bone to delete."),
       },
       handler: passthroughPost("/bone/delete"),
+    },
+    {
+      name: "bone_list",
+      description:
+        "List all edit bones with head/tail/roll/length/parent/useDeform/useConnect. Optional substring name filter. Use to audit a rig (find rolled bones, build a name set for renaming, verify UE5 convention).",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        namePattern: z
+          .string()
+          .optional()
+          .describe("Substring filter on bone names (case-sensitive)."),
+      },
+      handler: passthroughPost("/bone/list"),
+    },
+    {
+      name: "bone_set_edit_transform",
+      description:
+        "Set head/tail/roll/useDeform/useConnect on an existing edit bone. Pass only the keys you want to change. All edits run in EDIT mode and are wrapped in a single undo.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        boneName: z.string().describe("Bone to mutate."),
+        head: Vec3.optional().describe("New head (local space)."),
+        tail: Vec3.optional().describe("New tail (local space)."),
+        roll: z.number().optional().describe("New roll (radians)."),
+        useDeform: z.boolean().optional().describe("Whether bone deforms geometry."),
+        useConnect: z.boolean().optional().describe("Connect head to parent tail."),
+      },
+      handler: passthroughPost("/bone/set_edit_transform"),
+    },
+    {
+      name: "bone_set_roll",
+      description:
+        "Set roll (radians) on one or more edit bones. Pass roll=0 to clear roll. Prefer bone_recalculate_roll when you want auto-fix from a reference axis.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        boneNames: z.array(z.string()).min(1).describe("Bones to update."),
+        roll: z.number().describe("Roll value in radians."),
+      },
+      handler: passthroughPost("/bone/set_roll"),
+    },
+    {
+      name: "bone_recalculate_roll",
+      description:
+        "Auto-recalculate roll on a set of bones using a reference axis (wraps bpy.ops.armature.calculate_roll). For UE5 spine/neck/head, use type='GLOBAL_POS_Z'. Valid types: POS_X/Y/Z, NEG_X/Y/Z, GLOBAL_POS_X/Y/Z, GLOBAL_NEG_X/Y/Z, ACTIVE, VIEW, CURSOR.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        boneNames: z.array(z.string()).min(1).describe("Bones to recalculate."),
+        type: z
+          .enum([
+            "POS_X", "POS_Y", "POS_Z",
+            "NEG_X", "NEG_Y", "NEG_Z",
+            "GLOBAL_POS_X", "GLOBAL_POS_Y", "GLOBAL_POS_Z",
+            "GLOBAL_NEG_X", "GLOBAL_NEG_Y", "GLOBAL_NEG_Z",
+            "ACTIVE", "VIEW", "CURSOR",
+          ])
+          .optional()
+          .describe("Reference axis (default 'GLOBAL_POS_Z')."),
+      },
+      handler: passthroughPost("/bone/recalculate_roll"),
     },
   ]);
 }

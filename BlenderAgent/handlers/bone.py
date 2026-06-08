@@ -161,3 +161,210 @@ def bone_delete(body: dict[str, Any]) -> dict[str, Any]:
                 raise BoneNotFoundError(f"{name!r} not in armature")
             eb.remove(eb[name])
     return {"ok": True, "data": {"armatureObjectName": arm.name, "deletedBone": name}}
+
+
+@handler("POST", "/bone/list")
+def bone_list(body: dict[str, Any]) -> dict[str, Any]:
+    """List all edit bones with head/tail/roll/parent/length.
+
+    Body: {armatureObjectName: str, namePattern?: str (substring filter)}
+
+    Used by agents to audit armatures (verify UE5 roll convention, find bones
+    with rolled axes, build a name-set for renaming).
+    """
+    arm = get_armature_object(body.get("armatureObjectName"))
+    pattern = body.get("namePattern")
+    bones_data: list[dict[str, Any]] = []
+    with composite_undo(f"bone_list:{arm.name}"):
+        set_active_and_selected(arm)
+        with with_mode(arm, "EDIT"):
+            for b in arm.data.edit_bones:
+                if pattern and pattern not in b.name:
+                    continue
+                bones_data.append(
+                    {
+                        "name": b.name,
+                        "head": list(b.head),
+                        "tail": list(b.tail),
+                        "roll": float(b.roll),
+                        "length": float(b.length),
+                        "parent": b.parent.name if b.parent else None,
+                        "useConnect": bool(b.use_connect),
+                        "useDeform": bool(b.use_deform),
+                    }
+                )
+    return {
+        "ok": True,
+        "data": {
+            "armatureObjectName": arm.name,
+            "boneCount": len(bones_data),
+            "bones": bones_data,
+        },
+        "refs": {"armatureName": arm.name},
+    }
+
+
+@handler("POST", "/bone/set_edit_transform")
+def bone_set_edit_transform(body: dict[str, Any]) -> dict[str, Any]:
+    """Set head/tail/roll on an existing edit bone.
+
+    Body: {armatureObjectName: str, boneName: str,
+           head?: [x,y,z], tail?: [x,y,z], roll?: float,
+           useDeform?: bool, useConnect?: bool}
+
+    Pass only the keys you want to change.
+    """
+    from mathutils import Vector  # type: ignore
+
+    arm = get_armature_object(body.get("armatureObjectName"))
+    name = body.get("boneName")
+    if not name:
+        raise InvalidInputError("boneName is required")
+
+    head = body.get("head")
+    tail = body.get("tail")
+    roll = body.get("roll")
+    use_deform = body.get("useDeform")
+    use_connect = body.get("useConnect")
+
+    with composite_undo(f"bone_set_edit_transform:{arm.name}/{name}"):
+        set_active_and_selected(arm)
+        with with_mode(arm, "EDIT"):
+            eb = arm.data.edit_bones
+            if name not in eb:
+                raise BoneNotFoundError(f"{name!r} not in armature")
+            b = eb[name]
+            if head is not None:
+                b.head = Vector(tuple(head))
+            if tail is not None:
+                b.tail = Vector(tuple(tail))
+            if roll is not None:
+                b.roll = float(roll)
+            if use_deform is not None:
+                b.use_deform = bool(use_deform)
+            if use_connect is not None:
+                b.use_connect = bool(use_connect)
+            final_head = list(b.head)
+            final_tail = list(b.tail)
+            final_roll = float(b.roll)
+
+    return {
+        "ok": True,
+        "data": {
+            "armatureObjectName": arm.name,
+            "boneName": name,
+            "head": final_head,
+            "tail": final_tail,
+            "roll": final_roll,
+        },
+        "refs": {"armatureName": arm.name, "boneName": name},
+    }
+
+
+@handler("POST", "/bone/set_roll")
+def bone_set_roll(body: dict[str, Any]) -> dict[str, Any]:
+    """Set roll (rotation around the bone's Y-axis) on one or more edit bones.
+
+    Body: {armatureObjectName: str, boneNames: [str, ...], roll: float (radians)}
+
+    Use 0.0 to "clear" roll. Use bone/recalculate_roll for orientation-based
+    auto-fix (e.g. align Z to global +Z).
+    """
+    arm = get_armature_object(body.get("armatureObjectName"))
+    bone_names = body.get("boneNames")
+    if not bone_names:
+        raise InvalidInputError("boneNames is required (list of str)")
+    if isinstance(bone_names, str):
+        bone_names = [bone_names]
+    if "roll" not in body:
+        raise InvalidInputError("roll is required (radians)")
+    roll = float(body["roll"])
+
+    updated: list[dict[str, Any]] = []
+    with composite_undo(f"bone_set_roll:{arm.name}/{roll}"):
+        set_active_and_selected(arm)
+        with with_mode(arm, "EDIT"):
+            eb = arm.data.edit_bones
+            for name in bone_names:
+                if name not in eb:
+                    raise BoneNotFoundError(f"{name!r} not in armature {arm.name!r}")
+                eb[name].roll = roll
+                updated.append({"name": name, "roll": float(eb[name].roll)})
+    return {
+        "ok": True,
+        "data": {
+            "armatureObjectName": arm.name,
+            "updatedCount": len(updated),
+            "bones": updated,
+        },
+        "refs": {"armatureName": arm.name},
+    }
+
+
+_RECALC_ROLL_TYPES = {
+    "POS_X", "POS_Y", "POS_Z", "NEG_X", "NEG_Y", "NEG_Z",
+    "GLOBAL_POS_X", "GLOBAL_POS_Y", "GLOBAL_POS_Z",
+    "GLOBAL_NEG_X", "GLOBAL_NEG_Y", "GLOBAL_NEG_Z",
+    "ACTIVE", "VIEW", "CURSOR",
+}
+
+
+@handler("POST", "/bone/recalculate_roll")
+def bone_recalculate_roll(body: dict[str, Any]) -> dict[str, Any]:
+    """Auto-recalculate roll on a set of bones using a reference orientation.
+
+    Body: {armatureObjectName: str, boneNames: [str, ...],
+           type?: str (default 'GLOBAL_POS_Z')}
+
+    Wraps `bpy.ops.armature.calculate_roll`. Use 'GLOBAL_POS_Z' for UE5-style
+    spine/neck/head bones (their Z local should point up). Use 'GLOBAL_NEG_Z'
+    if the chain inverts.
+    """
+    import bpy  # type: ignore
+
+    arm = get_armature_object(body.get("armatureObjectName"))
+    bone_names = body.get("boneNames")
+    if not bone_names:
+        raise InvalidInputError("boneNames is required (list of str)")
+    if isinstance(bone_names, str):
+        bone_names = [bone_names]
+    roll_type = (body.get("type") or "GLOBAL_POS_Z").upper()
+    if roll_type not in _RECALC_ROLL_TYPES:
+        raise InvalidInputError(
+            f"type {roll_type!r} not in {sorted(_RECALC_ROLL_TYPES)}"
+        )
+
+    rolls_after: list[dict[str, Any]] = []
+    with composite_undo(f"bone_recalculate_roll:{arm.name}/{roll_type}"):
+        set_active_and_selected(arm)
+        with with_mode(arm, "EDIT"):
+            eb = arm.data.edit_bones
+            for b in eb:
+                b.select = False
+                b.select_head = False
+                b.select_tail = False
+            for name in bone_names:
+                if name not in eb:
+                    raise BoneNotFoundError(f"{name!r} not in armature {arm.name!r}")
+                eb[name].select = True
+                eb[name].select_head = True
+                eb[name].select_tail = True
+            with with_3dview_context():
+                try:
+                    bpy.ops.armature.calculate_roll(type=roll_type)
+                except (RuntimeError, TypeError) as exc:
+                    raise InvalidInputError(
+                        f"calculate_roll(type={roll_type!r}) failed: {exc}"
+                    ) from exc
+            for name in bone_names:
+                rolls_after.append({"name": name, "roll": float(eb[name].roll)})
+
+    return {
+        "ok": True,
+        "data": {
+            "armatureObjectName": arm.name,
+            "type": roll_type,
+            "bones": rolls_after,
+        },
+        "refs": {"armatureName": arm.name},
+    }

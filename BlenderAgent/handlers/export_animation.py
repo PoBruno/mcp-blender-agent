@@ -60,6 +60,7 @@ def export_fbx_skeletal(body: dict[str, Any]) -> dict[str, Any]:
         "primary_bone_axis": body.get("primaryBoneAxis", "Y"),
         "secondary_bone_axis": body.get("secondaryBoneAxis", "X"),
         "use_armature_deform_only": bool(body.get("useArmatureDeformOnly", True)),
+        "bake_space_transform": bool(body.get("bakeSpaceTransform", False)),
         "bake_anim": bool(body.get("bakeAnim", False)),
         "path_mode": body.get("pathMode", "AUTO"),
     }
@@ -109,6 +110,7 @@ def export_fbx_animation(body: dict[str, Any]) -> dict[str, Any]:
         "add_leaf_bones": bool(body.get("addLeafBones", False)),
         "primary_bone_axis": body.get("primaryBoneAxis", "Y"),
         "secondary_bone_axis": body.get("secondaryBoneAxis", "X"),
+        "bake_space_transform": bool(body.get("bakeSpaceTransform", False)),
         "bake_anim": True,
         "bake_anim_use_all_bones": True,
         "bake_anim_use_nla_strips": bool(body.get("useNlaStrips", True)),
