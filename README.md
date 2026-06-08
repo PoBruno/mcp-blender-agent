@@ -39,7 +39,7 @@ Two serving modes:
 
 ## Status
 
-� **Sprints 0–5 scaffold landed.** Addon (35 handler modules), TS server (16 tool files, ~140 tools), 12 tool integration tests + 3 recipe tests, install harness, CI matrix for ubuntu/windows/macos. Build is green; full validation on first CI run. See [.claude/docs/SPRINTS.md](.claude/docs/SPRINTS.md) for the per-task done log.
+**Sprints 0–5 scaffold landed and validated on Blender 5.1.2.** Addon (35 handler modules), TS server (16 tool files, ~140 tools), 12 tool integration tests (39 cases) + 3 recipe tests (03 metahuman face, 04 modular kit, 08 animation bake-export) — **all 42 tests passing on real Blender 5.1.2** (Steam install, port 9877 coexisting with ahujasid `blender-mcp` on 9876). Install harness in place; CI matrix runs build + both suites on ubuntu / windows / macos against Blender 4.2 LTS. See [.claude/docs/SPRINTS.md](.claude/docs/SPRINTS.md) for the per-task done log.
 
 ---
 

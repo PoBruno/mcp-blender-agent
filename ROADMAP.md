@@ -14,7 +14,7 @@ The matching [SPRINTS.md](.claude/docs/SPRINTS.md) breaks each phase into action
 
 - Repo scaffold (this commit).
 - `Tools/` skeleton: `package.json`, `tsconfig.json`, `vitest.config.ts`, `src/index.ts`, `src/blender-bridge.ts`, `src/types.ts`, `src/tools/server-status.ts`.
-- `BlenderAgent/` skeleton: `__init__.py` (addon registration), `server.py` (HTTP listener on `9876` with background thread + `bpy.app.timers` drain), `handlers/server_status.py`.
+- `BlenderAgent/` skeleton: `__init__.py` (addon registration), `server.py` (HTTP listener on `9877` with background thread + `bpy.app.timers` drain — `9876` is reserved for ahujasid's `blender-mcp`), `handlers/server_status.py`.
 - One Vitest integration test: spawn `blender --background --addons BlenderAgent`, hit `/server/status`, assert version.
 - CI: GitHub Actions matrix Windows + macOS + Linux against Blender 4.2 LTS.
 - Install brain skeleton — detect Blender version only, no real installation yet.

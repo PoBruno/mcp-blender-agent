@@ -53,7 +53,7 @@ Goal: a green Vitest test that spawns headless Blender, calls `server_status`, a
 
 - [x] **S0-13** `.github/workflows/ci.yml` matrix (ubuntu/windows/macos) installing Blender 4.2 LTS, running build + tests. <!-- done: 2026-06-08 -->
 
-- [ ] **S0-14** `CONTRIBUTING.md` short — link to CLAUDE.md, explain dual harness, explain `dev`-only workflow.
+- [x] **S0-14** `CONTRIBUTING.md` short — link to CLAUDE.md, explain dual harness, explain `dev`-only workflow. <!-- done: 2026-06-08 -->
 
 - [ ] **S0-15** First green CI tag `v0.0.1-bootstrap` on `dev`.
 
@@ -143,6 +143,6 @@ All structural work for Sprints 0–5 landed in a single push. Per-tool tests fo
 
 **Sprint 4** — light + world + camera + render (engine/resolution/still/animation), library link/override/reload, asset mark/clear, full export remainder (gltf, fbx_skeletal, fbx_animation), import_fbx/obj/gltf. Integration test: `render.test.ts`.
 
-**Sprint 5 (partial)** — `exec_python` env-flagged with `EXEC_PYTHON_DISABLED` default, install harness (`install/INSTALL.md`, `install/AGENT-INSTALL.md`, `install/PROMPT-TEMPLATES.md`). Integration test: `exec-python.test.ts`. Recipe coverage in `Tools/test/recipes/` still pending.
+**Sprint 5 (partial)** — `exec_python` env-flagged with `EXEC_PYTHON_DISABLED` default, install harness (`install/INSTALL.md`, `install/AGENT-INSTALL.md`, `install/PROMPT-TEMPLATES.md`), recipe tests landed: `recipe-03-metahuman-face.test.ts`, `recipe-04-level-modular-kit.test.ts`, `recipe-08-animation-bake-export.test.ts`. Recipes 1, 2, 5, 6, 7 remain.
 
-**Build status:** `cd Tools && npm run build` exits 0. 12 integration test files staged for CI; local execution blocked on absent Blender install. CI matrix (ubuntu/windows/macos) will validate on push.
+**Build status:** `cd Tools && npm run build` exits 0. **Real-world validation: 39/39 tool tests + 3/3 recipe tests passing on Blender 5.1.2 (Steam install, port 9877 coexisting with ahujasid blender-mcp on 9876).** CI matrix (ubuntu/windows/macos) installs Blender 4.2 LTS for upstream parity.
