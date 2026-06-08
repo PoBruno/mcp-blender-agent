@@ -307,15 +307,82 @@ async function main() {
       requireUnderscoreLR: true,
     }));
 
-  // ── §9 ── viewport render → validation.png ────────────────────────────────
+  // ── §9 ── viewport renders → 3 validation PNGs ──────────────────────────
   log("");
-  log("## §9 — render viewport validation screenshot");
+  log("## §9 — validation renders (front + aim 3x3 grid + skeleton from top)");
   log("");
-  const valShot = join(DELIVERY, "validation.png");
+
   await step("/render/set_resolution 1280x720",
     () => blenderPost("/render/set_resolution", { width: 1280, height: 720, percentage: 100 }));
-  await step("/render/render_still → validation.png",
-    () => blenderPost("/render/render_still", { filepath: valShot, fileFormat: "PNG" }));
+
+  // Ensure a camera exists; create one if scene has none
+  const camList = await blenderPost("/object/list", { typeFilter: "CAMERA" });
+  let camName = camList?.data?.objects?.[0]?.name;
+  if (!camName) {
+    const cc = await step("/camera/create ValidationCam",
+      () => blenderPost("/camera/create", { name: "ValidationCam", location: [0, -3, 1.5] }));
+    camName = cc?.data?.cameraObjectName ?? "ValidationCam";
+  } else {
+    log(`> reusing existing camera: ${camName}`);
+  }
+
+  // 9a — front render of the character (bind pose)
+  await step("/camera/frame_object front (rig)",
+    () => blenderPost("/camera/frame_object", {
+      cameraObjectName: camName,
+      targetObjectName: armName,
+      direction: "front",
+      paddingFactor: 1.2,
+      setActive: true,
+      includeChildren: true,
+    }));
+  const valFront = join(DELIVERY, "validation_front.png");
+  await step("/render/render_still → validation_front.png",
+    () => blenderPost("/render/render_still", { filepath: valFront, fileFormat: "PNG" }));
+
+  // 9b — 3x3 grid of AimOffset poses: render frames 1..9 individually
+  // (compositing into one image is a follow-up; for now we emit 9 separate PNGs
+  // into a subfolder so the artist can flip through them or build a contact sheet)
+  const aimDir = join(DELIVERY, "validation_aim_poses");
+  mkdirSync(aimDir, { recursive: true });
+  // Assign AimOffset_Char so we render the right action
+  await step("/action/assign_to_object AimOffset_Char (for grid)",
+    () => blenderPost("/action/assign_to_object", { objectName: armName, actionName: "AimOffset_Char" }));
+  // Frame from a slight front_top angle to see head rotation
+  await step("/camera/frame_object front_top (aim preview)",
+    () => blenderPost("/camera/frame_object", {
+      cameraObjectName: camName,
+      targetObjectName: armName,
+      direction: "front_top",
+      paddingFactor: 1.3,
+      setActive: true,
+      includeChildren: true,
+    }));
+  for (let f = 1; f <= 9; f++) {
+    await step(`render aim pose frame ${f}`,
+      async () => {
+        const sf = await blenderPost("/scene/set_frame_range", { frameCurrent: f });
+        if (!sf.ok) return sf;
+        return blenderPost("/render/render_still", {
+          filepath: join(aimDir, `pose_${String(f).padStart(2, "0")}.png`),
+          fileFormat: "PNG",
+        });
+      });
+  }
+
+  // 9c — skeleton-from-top view (good to see IK bones spread)
+  await step("/camera/frame_object top (skeleton)",
+    () => blenderPost("/camera/frame_object", {
+      cameraObjectName: camName,
+      targetObjectName: armName,
+      direction: "top",
+      paddingFactor: 1.5,
+      setActive: true,
+      includeChildren: true,
+    }));
+  const valTop = join(DELIVERY, "validation_skeleton_top.png");
+  await step("/render/render_still → validation_skeleton_top.png",
+    () => blenderPost("/render/render_still", { filepath: valTop, fileFormat: "PNG" }));
 
   // ── §10 ── export skeletal FBX → delivery/skeleton/ ──────────────────────
   log("");
@@ -363,25 +430,93 @@ async function main() {
 
   // ── §12 ── per-action exports → delivery/{locomotion,throw}/ ─────────────
   log("");
-  log("## §12 — per-action exports → locomotion / throw");
+  log("## §12 — per-action exports (inspect + dedup + clean names)");
   log("");
-  const actsRes = await blenderPost("/action/list", {});
-  const actions = (actsRes?.data?.actions ?? [])
-    .filter((a) => a.fcurveCount > 0 && a.name !== "AimOffset_Char");
 
-  for (const a of actions) {
-    const safe = a.name.replace(/[|\\/:*?"<>]/g, "_");
-    // Classify by name → locomotion / throw / aim-misc
-    const lower = a.name.toLowerCase();
-    const dst = lower.includes("throw") ? D_THR
-              : (lower.includes("walk") || lower.includes("idle") || lower.includes("run") || lower.includes("jog") || lower.includes("jump")) ? D_LOC
-              : D_LOC; // fallback bucket
-    const prefix = dst === D_THR ? "AS_Throw_" : "AS_Char_";
-    const outPath = join(dst, `${prefix}${safe}.fbx`);
-    await step(`assign + export ${a.name} → ${basename(dst)}/${basename(outPath)}`,
+  const actsRes = await blenderPost("/action/list", {});
+  const allActions = actsRes?.data?.actions ?? [];
+  log(`> ${allActions.length} action(s) listed; inspecting each…`);
+
+  // 12a — inspect every action to learn fcurve composition + dedup hash
+  const inspected = [];
+  for (const a of allActions) {
+    if (a.name === "AimOffset_Char") continue; // already exported in §11
+    const r = await blenderPost("/action/inspect", { actionName: a.name });
+    if (!r.ok) {
+      log(`> ⚠ inspect failed for ${a.name}: ${r.errorCode}`);
+      continue;
+    }
+    inspected.push({ ...r.data, originalName: a.name });
+  }
+
+  // 12b — filter shape-key-only actions (no bone fcurves = useless take)
+  const beforeShape = inspected.length;
+  const withBones = inspected.filter((x) => x.hasBoneFcurves);
+  const droppedShapeKey = beforeShape - withBones.length;
+  if (droppedShapeKey > 0) {
+    log(`> dropped **${droppedShapeKey}** shape-key-only action(s) (no bone fcurves)`);
+  }
+
+  // 12c — dedup by contentHash (NLA push-down clones produce identical hashes)
+  const byHash = new Map();
+  for (const x of withBones) {
+    if (!byHash.has(x.contentHash)) byHash.set(x.contentHash, []);
+    byHash.get(x.contentHash).push(x);
+  }
+  const unique = [];
+  let droppedDup = 0;
+  for (const group of byHash.values()) {
+    // Keep the one with the cleanest name (fewest `|` separators)
+    group.sort((a, b) =>
+      (a.originalName.split("|").length - b.originalName.split("|").length) ||
+      a.originalName.length - b.originalName.length
+    );
+    unique.push(group[0]);
+    droppedDup += group.length - 1;
+  }
+  if (droppedDup > 0) {
+    log(`> deduplicated **${droppedDup}** action clone(s) (identical contentHash)`);
+  }
+  log(`> **${unique.length}** unique action(s) will be exported`);
+
+  // 12d — compute clean name, rename action in Blender, classify, export
+  for (const x of unique) {
+    // Strip noise prefixes: "Armature|" repeats, "Key|" prefix
+    let clean = x.originalName
+      .replace(/^(?:Key\|)?(?:Armature\|)+/g, "")
+      .replace(/\.\d{3,}$/g, "")  // .001, .002 NLA suffixes
+      .replace(/[|\\/:*?"<>]/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    if (!clean) clean = "Action";
+
+    // Classify by name
+    const lower = clean.toLowerCase();
+    let dst, prefix;
+    if (lower.includes("throw")) {
+      dst = D_THR; prefix = "AS_Throw_";
+    } else {
+      dst = D_LOC; prefix = "AS_Char_";
+    }
+
+    const targetActionName = `${prefix.replace(/_$/, "")}_${clean}`;
+    const outPath = join(dst, `${targetActionName}.fbx`);
+
+    // Rename action if needed (preserves bone fcurves; FBX take = action.name)
+    if (x.originalName !== targetActionName) {
+      const ren = await step(`rename ${x.originalName} → ${targetActionName}`,
+        () => blenderPost("/action/rename", {
+          actionName: x.originalName,
+          newName: targetActionName,
+        }));
+      if (!ren.ok) continue;
+    }
+
+    // Assign + export
+    await step(`export ${targetActionName} → ${basename(dst)}/`,
       async () => {
         const assign = await blenderPost("/action/assign_to_object", {
-          objectName: armName, actionName: a.name,
+          objectName: armName, actionName: targetActionName,
         });
         if (!assign.ok) return assign;
         const exp = await blenderPost("/export/fbx_animation", {
@@ -393,7 +528,7 @@ async function main() {
           primaryBoneAxis: "Y", secondaryBoneAxis: "X",
         });
         if (exp.ok && existsSync(outPath)) {
-          log(`> ${basename(outPath)} — ${(statSync(outPath).size / 1024).toFixed(1)} KB`);
+          log(`> ${basename(outPath)} — ${(statSync(outPath).size / 1024).toFixed(1)} KB (${x.frameCount}f, ${x.bones.length} bones)`);
         }
         return exp;
       });
@@ -446,6 +581,85 @@ function finalize(_okOverall) {
   mkdirSync(DELIVERY, { recursive: true });
   writeFileSync(reportPath, lines.join("\n"), "utf8");
 
+  // ── MISSING_TAKES.md ── diff between ARTIS briefing demand and what shipped
+  // Pattern: classify each delivered locomotion/throw FBX by its filename and
+  // cross-check against the briefing's expected animation set. Anything not
+  // delivered shows up as TODO for the artist.
+  const REQUIRED = {
+    locomotion: [
+      { id: "Idle_neutral",  match: /Idle_?neutral|Idle\.fbx/i },
+      { id: "Walk_F",        match: /Walk_(?:forward(?!_diag)|F)\b/i },
+      { id: "Walk_B",        match: /Walk_backward(?!_diag)\b/i },
+      { id: "Walk_StrafeL",  match: /Walk_strafe_(?:left|l)\b/i },
+      { id: "Walk_StrafeR",  match: /Walk_strafe_(?:right|r)\b/i },
+      { id: "Walk_DiagFL",   match: /Walk_forward_diagonal_(?:left|l)/i },
+      { id: "Walk_DiagFR",   match: /Walk_forward_diagonal_(?:right|r)/i },
+      { id: "Walk_DiagBL",   match: /Walk_backward_diagonal_(?:left|l)/i },
+      { id: "Walk_DiagBR",   match: /Walk_backward_diagonal_(?:right|r)/i },
+      { id: "Jog_F",         match: /Jog_?(?:forward|F)/i },
+      { id: "Jump_Start",    match: /Jump_?Start/i },
+      { id: "Jump_Loop",     match: /Jump_?Loop/i },
+      { id: "Jump_Land",     match: /Jump_?Land/i },
+    ],
+    throw: [
+      { id: "Throw_Idle",     match: /Throw_?Idle/i },
+      { id: "Throw_Charge",   match: /Throw_?Charge/i },
+      { id: "Throw_Release",  match: /Throw_?Release|throw_0?1/i },
+      { id: "Throw_Followup", match: /Throw_?Followup/i },
+    ],
+  };
+  function diffSet(dir, required) {
+    const have = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".fbx")) : [];
+    const hits = required.map((req) => {
+      const matches = have.filter((f) => req.match.test(f));
+      return { id: req.id, status: matches.length > 0 ? "OK" : "MISSING", files: matches };
+    });
+    const used = new Set(hits.flatMap((h) => h.files));
+    const extras = have.filter((f) => !used.has(f));
+    return { hits, extras };
+  }
+  const locDiff = diffSet(D_LOC, REQUIRED.locomotion);
+  const thrDiff = diffSet(D_THR, REQUIRED.throw);
+  const missing = [
+    ...locDiff.hits.filter((h) => h.status === "MISSING"),
+    ...thrDiff.hits.filter((h) => h.status === "MISSING"),
+  ];
+  const present = [...locDiff.hits, ...thrDiff.hits].filter((h) => h.status === "OK").length;
+  const total = REQUIRED.locomotion.length + REQUIRED.throw.length;
+  const mt = [
+    "# MISSING_TAKES — briefing vs delivery diff",
+    "",
+    `Coverage: **${present}/${total}** required takes delivered.`,
+    "",
+    "## Locomotion",
+    "",
+    "| Required | Status | File(s) |",
+    "|----------|--------|---------|",
+    ...locDiff.hits.map((h) => `| ${h.id} | ${h.status === "OK" ? "✅" : "❌ MISSING"} | ${h.files.length ? h.files.join("<br>") : "—"} |`),
+    "",
+    "## Throw",
+    "",
+    "| Required | Status | File(s) |",
+    "|----------|--------|---------|",
+    ...thrDiff.hits.map((h) => `| ${h.id} | ${h.status === "OK" ? "✅" : "❌ MISSING"} | ${h.files.length ? h.files.join("<br>") : "—"} |`),
+    "",
+    "## Extras (delivered but not in briefing)",
+    "",
+    locDiff.extras.length || thrDiff.extras.length
+      ? [
+          ...locDiff.extras.map((f) => `- locomotion/${f}`),
+          ...thrDiff.extras.map((f) => `- throw/${f}`),
+        ].join("\n")
+      : "_(none)_",
+    "",
+    "## Action items for the artist",
+    "",
+    missing.length === 0
+      ? "_All required takes delivered._ ✅"
+      : missing.map((m) => `- [ ] Author **${m.id}**`).join("\n"),
+  ].join("\n");
+  writeFileSync(join(DELIVERY, "MISSING_TAKES.md"), mt, "utf8");
+
   // CHANGELOG
   const changelog = [
     `# Char_Master — delivery ${new Date().toISOString().slice(0, 10)}`,
@@ -465,7 +679,10 @@ function finalize(_okOverall) {
     "- `aim/AS_AimOffset_Char.fbx`     — 9 frames, ready to convert to BS_AimOffset_Char in UE",
     "- `locomotion/AS_Char_*.fbx`      — idle/walk variants (loopable; flag in UE)",
     "- `throw/AS_Throw_*.fbx`          — bocce throw actions (one-shot; add notifies in UE)",
-    "- `validation.png`                — viewport snapshot at delivery time",
+    "- `validation_front.png`          — character front view at bind pose",
+    "- `validation_aim_poses/*.png`    — 9 individual stills of each AimOffset pose",
+    "- `validation_skeleton_top.png`   — top-down view (good to see IK spread)",
+    "- `MISSING_TAKES.md`              — briefing vs delivery diff (any TODO for the artist)",
     "",
     "## Re-import notes",
     "Rig changed (bone names + IK + sockets) → UE5 must **re-import skeleton** and **re-target all animations**.",
@@ -473,8 +690,9 @@ function finalize(_okOverall) {
   writeFileSync(join(DELIVERY, "CHANGELOG.md"), changelog, "utf8");
 
   console.log("");
-  console.log(`>>> Report:    ${reportPath}`);
-  console.log(`>>> Changelog: ${join(DELIVERY, "CHANGELOG.md")}`);
+  console.log(`>>> Report:        ${reportPath}`);
+  console.log(`>>> Changelog:     ${join(DELIVERY, "CHANGELOG.md")}`);
+  console.log(`>>> MissingTakes:  ${join(DELIVERY, "MISSING_TAKES.md")}`);
 }
 
 main().catch((e) => {
