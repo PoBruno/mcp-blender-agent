@@ -60,6 +60,26 @@ export function registerObjectTools(server: McpServer): void {
       handler: passthroughPost("/object/duplicate_linked"),
     },
     {
+      name: "object_delete",
+      description:
+        "Remove one or more objects from the .blend (data + scene unlink). Idempotent — missing names are silently skipped unless strict=true. Use this to clean up default cubes after file_new before importing real content.",
+      inputSchema: {
+        objectNames: z
+          .array(z.string())
+          .optional()
+          .describe("List of object names to delete."),
+        objectName: z
+          .string()
+          .optional()
+          .describe("Single object name (alternative to objectNames)."),
+        strict: z
+          .boolean()
+          .optional()
+          .describe("If true, raise OBJECT_NOT_FOUND on the first missing name."),
+      },
+      handler: passthroughPost("/object/delete"),
+    },
+    {
       name: "mesh_set_origin_to_snap_corner",
       description:
         "Move the object origin to a named corner of its bounding box (e.g. MIN_X_MIN_Y_MIN_Z).",

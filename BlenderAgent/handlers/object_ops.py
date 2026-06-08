@@ -6,6 +6,7 @@ from typing import Any
 
 from ..helpers import (
     InvalidInputError,
+    ObjectNotFoundError,
     composite_undo,
     get_armature_object,
     get_collection,
@@ -101,6 +102,51 @@ def object_create(body: dict[str, Any]) -> dict[str, Any]:
             "Call /object/set_transform to position the object.",
             "Call /material/assign_slot to add a material.",
         ],
+    }
+
+
+@handler("POST", "/object/delete")
+def object_delete(body: dict[str, Any]) -> dict[str, Any]:
+    """Remove one or more objects from the .blend (data + scene unlink).
+
+    Body: {objectNames: [str, ...]} or {objectName: str}
+
+    Children are recursively detached but NOT deleted unless explicitly listed
+    (caller decides). Missing names are silently skipped — pass strict=true to
+    raise ObjectNotFoundError on the first missing one. Idempotent.
+    """
+    import bpy  # type: ignore
+
+    names = body.get("objectNames")
+    if names is None and "objectName" in body:
+        names = [body["objectName"]]
+    if not names:
+        raise InvalidInputError("objectNames or objectName required")
+    if isinstance(names, str):
+        names = [names]
+    strict = bool(body.get("strict", False))
+
+    deleted: list[str] = []
+    skipped: list[str] = []
+    with composite_undo(f"object_delete:{len(names)}"):
+        for n in names:
+            obj = bpy.data.objects.get(n)
+            if obj is None:
+                if strict:
+                    raise ObjectNotFoundError(f"object {n!r} not found")
+                skipped.append(n)
+                continue
+            bpy.data.objects.remove(obj, do_unlink=True)
+            deleted.append(n)
+
+    return {
+        "ok": True,
+        "data": {
+            "deletedCount": len(deleted),
+            "deleted": deleted,
+            "skippedCount": len(skipped),
+            "skipped": skipped,
+        },
     }
 
 
