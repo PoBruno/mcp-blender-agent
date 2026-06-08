@@ -582,6 +582,156 @@ def aim_offset_bake_9_pose_matrix(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# 3×3 grid cell names in source-frame order (frame 1..9).
+# Matches the bake layout in /aim_offset/bake_9_pose_matrix:
+#   1:LU  2:CU  3:RU
+#   4:LC  5:CC  6:RC
+#   7:LD  8:CD  9:RD
+# Two-letter code: <Horizontal (L/C/R)><Vertical (U/C/D)> — UE5
+# BlendSpace2D convention. The 9 cells become 9 standalone AnimSequences.
+_AIM_CELL_NAMES = ["LU", "CU", "RU", "LC", "CC", "RC", "LD", "CD", "RD"]
+
+
+@handler("POST", "/aim_offset/split_to_9_single_frame_actions")
+def aim_offset_split_to_9_single_frame_actions(body: dict[str, Any]) -> dict[str, Any]:
+    """Split a baked 9-pose AimOffset action into 9 single-frame actions, one
+    per grid cell, so UE5's BlendSpace2D can ingest each pose as its own
+    AnimSequence.
+
+    Source action must have keyframes at frames `frameStart .. frameStart+8`
+    on bone channels (the layout produced by /aim_offset/bake_9_pose_matrix).
+
+    For each cell i ∈ 0..8 we:
+      - Assign the source action to the armature and `scene.frame_set` to the
+        source frame so the depsgraph evaluates the pose.
+      - Snapshot every touched pose bone's transform channels (whatever the
+        source action keyframes — typically rotation_quaternion).
+      - Create (or overwrite) a new action named `<targetPrefix><cellName>`
+        where cellName ∈ {LU, CU, RU, LC, CC, RC, LD, CD, RD}.
+      - Assign the new action and write a single keyframe at frame 1 on every
+        snapshotted channel via `armature.keyframe_insert` — this is layered-
+        API safe (Blender 4.4+ channelbags handled transparently).
+
+    Returns: { actionNames: [9], createdCount, overwrittenCount, cellNames }
+    """
+    import bpy  # type: ignore
+
+    arm_name = body.get("armatureObjectName")
+    if not arm_name:
+        raise InvalidInputError("armatureObjectName is required")
+    arm = get_armature_object(arm_name)
+
+    src_name = body.get("sourceActionName")
+    if not src_name:
+        raise InvalidInputError("sourceActionName is required")
+    src = bpy.data.actions.get(src_name)
+    if src is None:
+        raise InvalidInputError(f"action {src_name!r} not found")
+
+    frame_start = int(body.get("frameStart", 1))
+    target_prefix = body.get("targetPrefix") or f"{src_name}_"
+
+    # Discover which bones + which channels the source action keyframes.
+    # We use the layered-API-safe _iter_fcurves helper to enumerate data_paths.
+    bone_channels: dict[str, set[str]] = {}  # bone_name → {"rotation_quaternion", "location", ...}
+    for data_path, _array_index, _kp_count in _iter_fcurves(src):
+        bname = _bone_name_from_data_path(data_path)
+        if not bname:
+            continue
+        # data_path is e.g. pose.bones["spine_02"].rotation_quaternion
+        suffix = data_path.rsplit("].", 1)[-1] if "]." in data_path else ""
+        if not suffix:
+            continue
+        bone_channels.setdefault(bname, set()).add(suffix)
+
+    if not bone_channels:
+        raise InvalidInputError(
+            f"source action {src_name!r} has no pose-bone fcurves to split"
+        )
+
+    pose_bones = arm.pose.bones
+    missing = [b for b in bone_channels if b not in pose_bones]
+    if missing:
+        raise BoneNotFoundError(
+            f"source action touches bones not in armature {arm.name!r}: {missing}"
+        )
+
+    created: list[str] = []
+    overwritten: list[str] = []
+    out_names: list[str] = []
+
+    scene = bpy.context.scene
+    saved_frame = scene.frame_current
+    saved_action = arm.animation_data.action if arm.animation_data else None
+
+    try:
+        with composite_undo(f"aim_offset_split:{src_name}"):
+            with with_mode(arm, "POSE"):
+                for i, cell in enumerate(_AIM_CELL_NAMES):
+                    # 1. Evaluate source pose at the source frame
+                    if arm.animation_data is None:
+                        arm.animation_data_create()
+                    arm.animation_data.action = src
+                    scene.frame_set(frame_start + i)
+
+                    # 2. Snapshot every touched channel
+                    snapshot: dict[tuple[str, str], Any] = {}
+                    for bname, channels in bone_channels.items():
+                        pb = pose_bones[bname]
+                        for ch in channels:
+                            val = getattr(pb, ch, None)
+                            if val is None:
+                                continue
+                            # Copy mutable vector / quaternion values
+                            snapshot[(bname, ch)] = (
+                                tuple(val) if hasattr(val, "__iter__") else val
+                            )
+
+                    # 3. Create / overwrite target action
+                    tgt_name = f"{target_prefix}{cell}"
+                    out_names.append(tgt_name)
+                    tgt = bpy.data.actions.get(tgt_name)
+                    if tgt is None:
+                        tgt = bpy.data.actions.new(name=tgt_name)
+                        created.append(tgt_name)
+                    else:
+                        _clear_action_fcurves(tgt)
+                        overwritten.append(tgt_name)
+
+                    # 4. Assign target action and key the snapshot at frame 1
+                    arm.animation_data.action = tgt
+                    scene.frame_set(1)
+                    for (bname, ch), val in snapshot.items():
+                        pb = pose_bones[bname]
+                        # Restore the channel value, then keyframe it
+                        if isinstance(val, tuple):
+                            setattr(pb, ch, val)
+                        else:
+                            setattr(pb, ch, val)
+                        arm.keyframe_insert(
+                            data_path=f'pose.bones["{bname}"].{ch}',
+                            frame=1,
+                        )
+    finally:
+        # Restore scene state
+        if arm.animation_data is not None:
+            arm.animation_data.action = saved_action
+        scene.frame_set(saved_frame)
+
+    return {
+        "ok": True,
+        "data": {
+            "sourceActionName": src_name,
+            "actionNames": out_names,
+            "createdCount": len(created),
+            "overwrittenCount": len(overwritten),
+            "cellNames": _AIM_CELL_NAMES,
+            "bonesTouched": sorted(bone_channels.keys()),
+        },
+        "refs": {"actionNames": out_names},
+    }
+
+
 @handler("POST", "/aim_offset/validate_9_pose_matrix")
 def aim_offset_validate_9_pose_matrix(body: dict[str, Any]) -> dict[str, Any]:
     """Validate a baked 9-pose AimOffset by measuring the WORLD-space rotation

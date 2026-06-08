@@ -62,6 +62,7 @@ def export_fbx_skeletal(body: dict[str, Any]) -> dict[str, Any]:
         "use_armature_deform_only": bool(body.get("useArmatureDeformOnly", True)),
         "bake_space_transform": bool(body.get("bakeSpaceTransform", False)),
         "bake_anim": bool(body.get("bakeAnim", False)),
+        "use_custom_props": bool(body.get("useCustomProps", False)),
         "path_mode": body.get("pathMode", "AUTO"),
     }
 
@@ -99,6 +100,19 @@ def export_fbx_animation(body: dict[str, Any]) -> dict[str, Any]:
     arm.select_set(True)
     bpy.context.view_layer.objects.active = arm
 
+    # Optional temporary scene frame range — the FBX baker reads
+    # scene.frame_start / scene.frame_end. Restore on exit so we do not leak
+    # state into subsequent exports.
+    scene = bpy.context.scene
+    saved_start = scene.frame_start
+    saved_end = scene.frame_end
+    fs_override = body.get("frameStart")
+    fe_override = body.get("frameEnd")
+    if fs_override is not None:
+        scene.frame_start = int(fs_override)
+    if fe_override is not None:
+        scene.frame_end = int(fe_override)
+
     params = {
         "filepath": filepath,
         "use_selection": True,
@@ -118,6 +132,7 @@ def export_fbx_animation(body: dict[str, Any]) -> dict[str, Any]:
         "bake_anim_force_startend_keying": True,
         "bake_anim_step": float(body.get("bakeAnimStep", 1.0)),
         "bake_anim_simplify_factor": float(body.get("bakeAnimSimplifyFactor", 1.0)),
+        "use_custom_props": bool(body.get("useCustomProps", False)),
         "path_mode": body.get("pathMode", "AUTO"),
     }
 
@@ -125,6 +140,9 @@ def export_fbx_animation(body: dict[str, Any]) -> dict[str, Any]:
         bpy.ops.export_scene.fbx(**params)
     except Exception as exc:  # noqa: BLE001
         raise ExportFailedError(f"FBX animation export failed: {exc}") from exc
+    finally:
+        scene.frame_start = saved_start
+        scene.frame_end = saved_end
 
     return {
         "ok": True,

@@ -147,6 +147,25 @@ export function registerAnimationTools(server: McpServer): void {
       handler: passthroughPost("/aim_offset/validate_9_pose_matrix"),
     },
     {
+      name: "aim_offset_split_to_9_single_frame_actions",
+      description:
+        "Split a baked 9-pose AimOffset action (frames 1..9) into 9 single-frame actions, one per BlendSpace2D cell. Snapshots every touched pose-bone channel at the source frame and re-keys it at frame 1 of a new action. Cell suffixes: LU CU RU LC CC RC LD CD RD (Left/Center/Right × Up/Center/Down). Use before exporting individual AnimSequences for UE5 BlendSpace2D.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature owning the source action (used to snapshot pose at each source frame)."),
+        sourceActionName: z.string().describe("The baked 9-pose master action (e.g. 'AimOffset_Char')."),
+        targetPrefix: z
+          .string()
+          .optional()
+          .describe("Prefix for the 9 new actions (default '<sourceActionName>_'). Final names = prefix + cell suffix."),
+        frameStart: z
+          .number()
+          .int()
+          .optional()
+          .describe("Source frame of the first cell (default 1; 9 cells sampled at frameStart..frameStart+8)."),
+      },
+      handler: passthroughPost("/aim_offset/split_to_9_single_frame_actions"),
+    },
+    {
       name: "keyframe_add",
       description: "Insert a keyframe at a frame for a data path.",
       inputSchema: {
