@@ -53,12 +53,17 @@ export function registerSocketTools(server: McpServer): void {
   registerTools(server, [
     {
       name: "socket_add",
-      description: "Add a SOCKET_<name> Empty as a child for UE5 attachment.",
+      description:
+        "Add a SOCKET_<name> Empty for UE5 attachment. When boneName is set AND parent is an Armature, the empty is parented to that bone via parent_type='BONE' — UE5 detects this as a per-bone socket on import. Without boneName the empty is parented to the object's origin. Idempotent: re-running with the same name updates the existing socket.",
       inputSchema: {
-        objectName: z.string().describe("Parent object."),
-        name: z.string().describe("Socket name (SOCKET_ prefix auto-added)."),
-        location: Vec3.optional().describe("Local location."),
-        rotation: Vec3.optional().describe("Local Euler rotation."),
+        objectName: z.string().describe("Parent object (typically the Armature)."),
+        name: z.string().describe("Socket short name (SOCKET_ prefix auto-added)."),
+        boneName: z
+          .string()
+          .optional()
+          .describe("Bone to attach to (parent must be an ARMATURE)."),
+        location: Vec3.optional().describe("Local offset relative to parent / bone head."),
+        rotation: Vec3.optional().describe("Local Euler rotation in radians."),
       },
       handler: passthroughPost("/socket/add"),
     },
