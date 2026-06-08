@@ -108,6 +108,179 @@ def action_list(body: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "data": {"count": len(items), "actions": items}}
 
 
+def _iter_fcurves(act: Any):
+    """Yield every fcurve on an action, across legacy and layered APIs.
+
+    Each yield is a tuple (data_path: str, array_index: int, keyframe_count: int).
+    """
+    # Legacy path
+    fc = getattr(act, "fcurves", None)
+    if fc is not None:
+        try:
+            for cu in fc:
+                yield (cu.data_path or "", int(cu.array_index), len(cu.keyframe_points))
+            return
+        except TypeError:
+            pass
+
+    # Layered path
+    layers = getattr(act, "layers", None)
+    slots = getattr(act, "slots", None)
+    if layers is None or slots is None:
+        return
+    for layer in layers:
+        for strip in getattr(layer, "strips", []):
+            for slot in slots:
+                cb = None
+                if hasattr(strip, "channelbag"):
+                    try:
+                        cb = strip.channelbag(slot)
+                    except (RuntimeError, TypeError):
+                        cb = None
+                if cb is None or not hasattr(cb, "fcurves"):
+                    continue
+                try:
+                    for cu in cb.fcurves:
+                        yield (cu.data_path or "", int(cu.array_index), len(cu.keyframe_points))
+                except TypeError:
+                    pass
+
+
+def _classify_data_path(dp: str) -> str:
+    """Return 'bone' | 'shape_key' | 'object' | 'other' for an fcurve data_path."""
+    if dp.startswith("pose.bones["):
+        return "bone"
+    if dp.startswith("key_blocks["):
+        return "shape_key"
+    if dp in ("location", "rotation_euler", "rotation_quaternion", "rotation_axis_angle",
+              "scale", "delta_location", "delta_rotation_euler", "delta_scale"):
+        return "object"
+    return "other"
+
+
+def _bone_name_from_data_path(dp: str) -> str:
+    """Extract the bone name from a pose.bones["X"]... data_path. '' if not bone."""
+    if not dp.startswith('pose.bones["'):
+        return ""
+    end = dp.find('"]', 12)
+    if end < 0:
+        return ""
+    return dp[12:end]
+
+
+@handler("POST", "/action/inspect")
+def action_inspect(body: dict[str, Any]) -> dict[str, Any]:
+    """Deep-inspect an action: fcurve categories, touched bones, and a content
+    hash usable for dedup.
+
+    Body: {actionName: str}
+
+    Returns:
+        actionName, frameStart, frameEnd, frameCount,
+        fcurveCount, boneFcurveCount, shapeKeyFcurveCount, objectFcurveCount,
+        otherFcurveCount, hasBoneFcurves, hasShapeKeyFcurves, hasObjectFcurves,
+        bones: [str] (sorted, unique bones touched),
+        contentHash: str (sha1 of sorted (path, idx, kfCount) tuples — animations
+                          with identical structure produce identical hashes; useful
+                          for dedup of NLA push-down clones).
+    """
+    import hashlib
+
+    act = get_action(body.get("actionName"))
+    fr = act.frame_range
+
+    bone_cnt = sk_cnt = obj_cnt = other_cnt = 0
+    bones: set[str] = set()
+    sig: list[tuple[str, int, int]] = []
+    for dp, idx, kfn in _iter_fcurves(act):
+        sig.append((dp, idx, kfn))
+        cat = _classify_data_path(dp)
+        if cat == "bone":
+            bone_cnt += 1
+            bn = _bone_name_from_data_path(dp)
+            if bn:
+                bones.add(bn)
+        elif cat == "shape_key":
+            sk_cnt += 1
+        elif cat == "object":
+            obj_cnt += 1
+        else:
+            other_cnt += 1
+
+    sig.sort()
+    h = hashlib.sha1()
+    for dp, idx, kfn in sig:
+        h.update(f"{dp}|{idx}|{kfn}\n".encode("utf-8"))
+
+    total = bone_cnt + sk_cnt + obj_cnt + other_cnt
+    return {
+        "ok": True,
+        "data": {
+            "actionName": act.name,
+            "frameStart": float(fr[0]),
+            "frameEnd": float(fr[1]),
+            "frameCount": int(fr[1] - fr[0]) + 1,
+            "fcurveCount": total,
+            "boneFcurveCount": bone_cnt,
+            "shapeKeyFcurveCount": sk_cnt,
+            "objectFcurveCount": obj_cnt,
+            "otherFcurveCount": other_cnt,
+            "hasBoneFcurves": bone_cnt > 0,
+            "hasShapeKeyFcurves": sk_cnt > 0,
+            "hasObjectFcurves": obj_cnt > 0,
+            "bones": sorted(bones),
+            "contentHash": h.hexdigest(),
+        },
+        "refs": {"actionName": act.name},
+    }
+
+
+@handler("POST", "/action/rename")
+def action_rename(body: dict[str, Any]) -> dict[str, Any]:
+    """Rename an action.
+
+    Body: {actionName: str, newName: str}
+
+    Idempotent: if actionName==newName, returns ok without touching the action.
+    Refuses if newName already exists on a different action (returns
+    INVALID_INPUT). Preserves use_fake_user and existing animation_data refs
+    (Blender's name-key rename keeps refs intact).
+    """
+    import bpy  # type: ignore
+
+    act = get_action(body.get("actionName"))
+    new_name = body.get("newName")
+    if not new_name or not isinstance(new_name, str):
+        raise InvalidInputError("newName is required (non-empty string)")
+
+    if act.name == new_name:
+        return {
+            "ok": True,
+            "data": {"actionName": act.name, "renamed": False, "previousName": act.name},
+            "refs": {"actionName": act.name},
+        }
+
+    existing = bpy.data.actions.get(new_name)
+    if existing is not None and existing != act:
+        raise InvalidInputError(
+            f"action {new_name!r} already exists; rename would collide"
+        )
+
+    previous = act.name
+    with composite_undo(f"action_rename:{previous}->{new_name}"):
+        act.name = new_name
+
+    return {
+        "ok": True,
+        "data": {
+            "actionName": act.name,
+            "renamed": True,
+            "previousName": previous,
+        },
+        "refs": {"actionName": act.name},
+    }
+
+
 @handler("POST", "/action/assign_to_object")
 def action_assign_to_object(body: dict[str, Any]) -> dict[str, Any]:
     obj = get_object(body.get("objectName"))

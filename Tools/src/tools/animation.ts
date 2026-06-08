@@ -37,6 +37,25 @@ export function registerAnimationTools(server: McpServer): void {
       handler: passthroughPost("/action/list"),
     },
     {
+      name: "action_inspect",
+      description:
+        "Deep-inspect a single action: categorize every fcurve as bone / shape_key / object / other, list touched bones, and compute a contentHash usable for dedup (NLA push-down clones produce identical hashes). Use BEFORE batch-exporting actions to filter out shape-key-only or duplicate takes.",
+      inputSchema: {
+        actionName: z.string().describe("Action name to inspect."),
+      },
+      handler: passthroughPost("/action/inspect"),
+    },
+    {
+      name: "action_rename",
+      description:
+        "Rename an action. Idempotent (same name → no-op). Refuses name collision. Use to sanitize artist-named actions like 'Armature|Armature|Walk' → 'Walk_F' before export.",
+      inputSchema: {
+        actionName: z.string().describe("Current action name."),
+        newName: z.string().describe("New action name."),
+      },
+      handler: passthroughPost("/action/rename"),
+    },
+    {
       name: "aim_offset_bake_9_pose_matrix",
       description:
         "Bake a 9-pose AimOffset (3x3 yaw/pitch grid) by distributing rotation across spine + neck + head bones (ARTIS §3.3 — 'cabeça gira mais que tronco'). Default weights split as 17/22/61% yaw and 5/15/80% pitch.",
