@@ -143,9 +143,9 @@ All structural work for Sprints 0–5 landed in a single push. Per-tool tests fo
 
 **Sprint 4** — light + world + camera + render (engine/resolution/still/animation), library link/override/reload, asset mark/clear, full export remainder (gltf, fbx_skeletal, fbx_animation), import_fbx/obj/gltf. Integration test: `render.test.ts`.
 
-**Sprint 5 (partial)** — `exec_python` env-flagged with `EXEC_PYTHON_DISABLED` default, install harness (`install/INSTALL.md`, `install/AGENT-INSTALL.md`, `install/PROMPT-TEMPLATES.md`), recipe tests landed: `recipe-03-metahuman-face.test.ts`, `recipe-04-level-modular-kit.test.ts`, `recipe-08-animation-bake-export.test.ts`. Recipes 1, 2, 5, 6, 7 remain (require future tools beyond the v1.0 set).
+**Sprint 5 (partial)** — `exec_python` env-flagged with `EXEC_PYTHON_DISABLED` default, install harness (`install/INSTALL.md`, `install/AGENT-INSTALL.md`, `install/PROMPT-TEMPLATES.md`), recipe tests landed: 1, 3, 4, 5, 6, 7, 8 passing on Blender 5.1.2 (`recipe-01-character-skeletal.test.ts`, `recipe-03-metahuman-face.test.ts`, `recipe-04-level-modular-kit.test.ts`, `recipe-05-prop-bake-export.test.ts`, `recipe-06-foliage-scatter.test.ts`, `recipe-07-cinematic-render.test.ts`, `recipe-08-animation-bake-export.test.ts`). Recipe 2 (`recipe-02-character-retarget.test.ts`) is a documented skip — requires four composite tools not in v1.0 (`armature_apply_scale`, `bone_rename_convention`, `armature_create_ue5_mannequin`, `armature_retarget_to_ue5_mannequin`) plus a Mixamo FBX fixture.
 
-**Build status:** `cd Tools && npm run build` exits 0. **Real-world validation: 100% endpoint coverage on Blender 5.1.2 — 136/137 tool tests passing + 3/3 recipe tests passing (1 skipped: `bpy.data.libraries.load` is unreliable headless on Windows 5.x). All 131 registered HTTP endpoints are exercised by integration tests, including error-code paths.** Test files: 31 in `Tools/test/tools/`, 3 in `Tools/test/recipes/`. CI matrix (ubuntu/windows/macos) installs Blender 4.2 LTS for upstream parity.
+**Build status:** `cd Tools && npm run build` exits 0. **Real-world validation: 153 tool tests passing + 2 skipped (1 file-extras, 1 recipe-02) across 37 test files on Blender 5.1.2.** 100% endpoint coverage on all 138 HTTP endpoints. Test files: 34 in `Tools/test/tools/`, 8 in `Tools/test/recipes/`. CI matrix (ubuntu/windows/macos) installs Blender 4.2 LTS for upstream parity.
 
 **Bugs found and fixed during runtime validation:**
 
@@ -154,3 +154,13 @@ All structural work for Sprints 0–5 landed in a single push. Per-tool tests fo
 - `view_layer/list` used the non-existent `scene.view_layers.active`. Switched to `bpy.context.view_layer`.
 - `file/append_data` + `library/link` leaked `ValueError` from `bpy.data.libraries.load` (e.g. "Cannot load from current blend file") as `INTERNAL_ERROR`. Wrapped as `INVALID_INPUT`.
 - `compositor/add_node`, `shader_node/add`, `geo_node/add_node` raised `TypeError` (not `RuntimeError`) on unknown node type — caught both.
+- `object/create` with `type=CONE` passed unrecognized `radius` kwarg (cone takes `radius1`); `type=TORUS` passed `size` (torus takes `major_radius`/`minor_radius`). Both fixed.
+
+**New endpoints landed during recipe validation (5):**
+
+- `camera/set_dof` — focus_distance, fStop, focusObjectName, useDof toggle.
+- `camera/set_clipping` — clip_start/clip_end with validation (start > 0, end > start).
+- `render/set_output` — single composite for filepath, fileFormat, colorMode, colorDepth, frameStart/End/Step, fps, fpsBase, compression.
+- `compositor/set_node_property` — set top-level RNA properties on compositor nodes (mute, base_path, blend_type, label).
+- `compositor/set_node_input` — set default_value on a compositor node input socket (e.g. HueSat.Saturation).
+- `geo_node/set_node_input` — set default_value on geo-node input (primitive `value` or `valueObjectName` for NodeSocketObject).
