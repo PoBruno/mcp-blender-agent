@@ -50,6 +50,37 @@ export function registerMaterialTools(server: McpServer): void {
       },
       handler: passthroughPost("/material/create_procedural_grid"),
     },
+    {
+      name: "material_create_pbr_from_textures",
+      description:
+        "Create a Principled BSDF material wired to up to 4 PBR texture maps (baseColor, normal, metallic, roughness). Loads each image with correct color space (sRGB for baseColor, Non-Color for others), handles OpenGL or DirectX normal maps (auto-inverts green channel for DirectX), and wires the whole graph in one undo step. Returns the list of created texture nodes.",
+      inputSchema: {
+        name: z.string().describe("Material name (created or reused)."),
+        baseColor: z
+          .string()
+          .optional()
+          .describe("Absolute filepath to base color (albedo) texture (sRGB)."),
+        normal: z
+          .string()
+          .optional()
+          .describe("Absolute filepath to normal map (plugged via Normal Map node)."),
+        metallic: z.string().optional().describe("Absolute filepath to metallic mask."),
+        roughness: z.string().optional().describe("Absolute filepath to roughness map."),
+        normalSpace: z
+          .enum(["OpenGL", "DirectX"])
+          .optional()
+          .describe("Normal map convention (default 'OpenGL'). 'DirectX' auto-inverts the green channel."),
+        uvMap: z
+          .string()
+          .optional()
+          .describe("Specific UV map name to bind via UV Map node (default: active UV)."),
+        replaceExisting: z
+          .boolean()
+          .optional()
+          .describe("If true (default), wipe any existing node tree on this material."),
+      },
+      handler: passthroughPost("/material/create_pbr_from_textures"),
+    },
   ]);
 }
 

@@ -146,3 +146,138 @@ def material_create_procedural_grid(body: dict[str, Any]) -> dict[str, Any]:
         "data": {"materialName": mat.name, "squareSize": square_size},
         "refs": {"materialName": mat.name, "nodeTreeName": mat.node_tree.name},
     }
+
+
+@handler("POST", "/material/create_pbr_from_textures")
+def material_create_pbr_from_textures(body: dict[str, Any]) -> dict[str, Any]:
+    """Create a Principled BSDF material wired to up to 4 PBR texture maps.
+
+    Body: {
+      name: str,
+      baseColor?: str (filepath to color texture, sRGB),
+      normal?: str (filepath, Non-Color, plugged through ShaderNodeNormalMap),
+      metallic?: str (filepath, Non-Color),
+      roughness?: str (filepath, Non-Color),
+      normalSpace?: 'OpenGL' | 'DirectX' (default 'OpenGL'),
+      uvMap?: str (uv map name, default active),
+      replaceExisting?: bool (default true — wipes existing node tree)
+    }
+
+    Each provided texture is loaded as a packed image (or linked, see packImages)
+    into an Image Texture node. Color spaces are set correctly (sRGB for
+    baseColor, Non-Color for the rest). For DirectX normal maps the green
+    channel is inverted via a Separate/Combine Color pair. The output is wired
+    to a single Material Output node.
+
+    Returns the list of (slot, nodeName, image, colorspace) for traceability.
+    """
+    import bpy  # type: ignore
+
+    name = body.get("name")
+    if not name:
+        raise InvalidInputError("name is required")
+
+    base_color = body.get("baseColor")
+    normal = body.get("normal")
+    metallic = body.get("metallic")
+    roughness = body.get("roughness")
+    normal_space = body.get("normalSpace", "OpenGL")
+    uv_map = body.get("uvMap")
+    replace = bool(body.get("replaceExisting", True))
+
+    if normal_space not in ("OpenGL", "DirectX"):
+        raise InvalidInputError("normalSpace must be 'OpenGL' or 'DirectX'")
+
+    # Validate every provided file exists up-front
+    import os
+    for label, path in (("baseColor", base_color), ("normal", normal),
+                        ("metallic", metallic), ("roughness", roughness)):
+        if path and not os.path.isfile(path):
+            raise InvalidInputError(f"{label} texture not found: {path}")
+
+    created: list[dict[str, Any]] = []
+
+    with composite_undo(f"material_create_pbr_from_textures:{name}"):
+        if name in bpy.data.materials:
+            mat = bpy.data.materials[name]
+        else:
+            mat = bpy.data.materials.new(name=name)
+        mat.use_nodes = True
+
+        tree = mat.node_tree
+        if replace:
+            for n in list(tree.nodes):
+                tree.nodes.remove(n)
+
+        bsdf = tree.nodes.new("ShaderNodeBsdfPrincipled")
+        bsdf.location = (0, 0)
+        out = tree.nodes.new("ShaderNodeOutputMaterial")
+        out.location = (400, 0)
+        tree.links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
+
+        def _add_image(path: str, slot: str, y: int, colorspace: str) -> Any:
+            img = bpy.data.images.load(path, check_existing=True)
+            try:
+                img.colorspace_settings.name = colorspace
+            except Exception:  # noqa: BLE001
+                pass
+            tex = tree.nodes.new("ShaderNodeTexImage")
+            tex.image = img
+            tex.location = (-600, y)
+            tex.name = f"Tex_{slot}"
+            if uv_map:
+                uv = tree.nodes.new("ShaderNodeUVMap")
+                uv.uv_map = uv_map
+                uv.location = (-900, y)
+                tree.links.new(uv.outputs["UV"], tex.inputs["Vector"])
+            created.append({
+                "slot": slot, "nodeName": tex.name,
+                "image": img.name, "filepath": path, "colorspace": colorspace,
+            })
+            return tex
+
+        if base_color:
+            tex = _add_image(base_color, "baseColor", 300, "sRGB")
+            tree.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
+
+        if metallic:
+            tex = _add_image(metallic, "metallic", 0, "Non-Color")
+            tree.links.new(tex.outputs["Color"], bsdf.inputs["Metallic"])
+
+        if roughness:
+            tex = _add_image(roughness, "roughness", -300, "Non-Color")
+            tree.links.new(tex.outputs["Color"], bsdf.inputs["Roughness"])
+
+        if normal:
+            tex = _add_image(normal, "normal", -600, "Non-Color")
+            nmap = tree.nodes.new("ShaderNodeNormalMap")
+            nmap.location = (-200, -600)
+            if normal_space == "DirectX":
+                # Invert green channel: Separate Color → Invert G → Combine Color
+                sep = tree.nodes.new("ShaderNodeSeparateColor")
+                sep.location = (-450, -600)
+                inv = tree.nodes.new("ShaderNodeInvert")
+                inv.location = (-350, -680)
+                comb = tree.nodes.new("ShaderNodeCombineColor")
+                comb.location = (-280, -600)
+                tree.links.new(tex.outputs["Color"], sep.inputs["Color"])
+                tree.links.new(sep.outputs["Red"], comb.inputs["Red"])
+                tree.links.new(sep.outputs["Green"], inv.inputs["Color"])
+                tree.links.new(inv.outputs["Color"], comb.inputs["Green"])
+                tree.links.new(sep.outputs["Blue"], comb.inputs["Blue"])
+                tree.links.new(comb.outputs["Color"], nmap.inputs["Color"])
+            else:
+                tree.links.new(tex.outputs["Color"], nmap.inputs["Color"])
+            tree.links.new(nmap.outputs["Normal"], bsdf.inputs["Normal"])
+
+    return {
+        "ok": True,
+        "data": {
+            "materialName": mat.name,
+            "normalSpace": normal_space,
+            "textures": created,
+            "textureCount": len(created),
+        },
+        "refs": {"materialName": mat.name, "nodeTreeName": mat.node_tree.name},
+    }
+
