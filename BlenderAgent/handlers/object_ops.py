@@ -62,8 +62,18 @@ def object_create(body: dict[str, Any]) -> dict[str, Any]:
     if prim_type == "EMPTY":
         # bpy.ops.object.empty_add takes location/rotation but not scale; pass type for display.
         kwargs = {"location": location, "rotation": rotation, "type": body.get("emptyType", "PLAIN_AXES")}
-    elif prim_type in {"CUBE", "PLANE", "SPHERE", "CYLINDER", "CONE", "ICOSPHERE"}:
-        kwargs["size" if prim_type in {"CUBE", "PLANE"} else "radius"] = size if prim_type in {"CUBE", "PLANE"} else size / 2
+    elif prim_type in {"CUBE", "PLANE"}:
+        kwargs["size"] = size
+    elif prim_type == "CONE":
+        # primitive_cone_add takes radius1 (base) and radius2 (top); not "radius".
+        kwargs["radius1"] = size / 2
+    elif prim_type == "TORUS":
+        # primitive_torus_add uses major_radius / minor_radius; map size -> major.
+        kwargs["major_radius"] = size / 2
+        kwargs["minor_radius"] = max(size / 8, 0.01)
+    else:
+        # SPHERE, CYLINDER, ICOSPHERE all accept "radius".
+        kwargs["radius"] = size / 2
 
     with composite_undo(f"object_create:{prim_type}"):
         with with_3dview_context():

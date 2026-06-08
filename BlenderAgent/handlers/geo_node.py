@@ -123,3 +123,60 @@ def geo_node_apply_to_object(body: dict[str, Any]) -> dict[str, Any]:
         "data": {"objectName": obj.name, "modifierName": mod.name, "nodeGroupName": ng.name},
         "refs": {"objectName": obj.name, "modifierName": mod.name, "nodeGroupName": ng.name},
     }
+
+
+@handler("POST", "/geo_node/set_node_input")
+def geo_node_set_node_input(body: dict[str, Any]) -> dict[str, Any]:
+    """Set the default_value of a geometry node's input socket.
+
+    Body: {nodeGroupName: str, nodeName: str, inputName: str, value: any,
+           valueObjectName?: str (looks up bpy.data.objects[valueObjectName] when
+           the target socket is a NodeSocketObject)}
+
+    Use cases:
+      - Set Density on DistributePointsOnFaces (float input)
+      - Set Object on ObjectInfo (Object input — pass valueObjectName)
+      - Set Seed on Random Value (int input)
+    """
+    import bpy  # type: ignore
+    tree = _get_geo_tree(body)
+    node_name = body.get("nodeName")
+    input_name = body.get("inputName")
+    if not node_name or not input_name:
+        raise InvalidInputError("nodeName and inputName are required")
+    node = tree.nodes.get(node_name)
+    if node is None:
+        raise NodeNotFoundError(f"node {node_name!r} not found in {tree.name!r}")
+    sock = node.inputs.get(input_name)
+    if sock is None:
+        raise InvalidInputError(
+            f"node {node_name!r} has no input socket {input_name!r}"
+        )
+
+    obj_name = body.get("valueObjectName")
+    if obj_name is not None:
+        target = bpy.data.objects.get(obj_name)
+        if target is None:
+            raise InvalidInputError(f"object {obj_name!r} not found")
+        value: Any = target
+    else:
+        if "value" not in body:
+            raise InvalidInputError("value (or valueObjectName) is required")
+        value = body["value"]
+
+    with composite_undo(f"geo_node_set_node_input:{tree.name}/{node.name}.{input_name}"):
+        try:
+            sock.default_value = value
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise InvalidInputError(
+                f"cannot set input {input_name!r} on {node.name!r}: {exc}"
+            ) from exc
+    return {
+        "ok": True,
+        "data": {
+            "nodeGroupName": tree.name,
+            "nodeName": node.name,
+            "inputName": input_name,
+        },
+        "refs": {"nodeGroupName": tree.name, "nodeName": node.name},
+    }

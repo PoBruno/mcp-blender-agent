@@ -50,6 +50,22 @@ export function registerGeoNodeTools(server: McpServer): void {
       },
       handler: passthroughPost("/geo_node/apply_to_object"),
     },
+    {
+      name: "geo_node_set_node_input",
+      description:
+        "Set default_value of a geometry node input socket. Pass `value` for primitives, `valueObjectName` for NodeSocketObject inputs (e.g. ObjectInfo.Object).",
+      inputSchema: {
+        nodeGroupName: z.string().describe("GeometryNodeTree name."),
+        nodeName: z.string().describe("Node name inside the tree."),
+        inputName: z.string().describe("Input socket identifier."),
+        value: z.unknown().optional().describe("Primitive value (float/int/vec3)."),
+        valueObjectName: z
+          .string()
+          .optional()
+          .describe("Object name to set as the socket value (for NodeSocketObject)."),
+      },
+      handler: passthroughPost("/geo_node/set_node_input"),
+    },
   ]);
 }
 
