@@ -428,12 +428,76 @@ async function main() {
   await step("/render/render_still → validation_skeleton_top.png",
     () => blenderPost("/render/render_still", { filepath: valTop, fileFormat: "PNG" }));
 
+  // ── §9.5 ── skeleton hygiene for UE5 import ──────────────────────────────
+  // The imported FBX brings two UE5-unfriendly things:
+  //   1. The root bone is named like "bone.015" (Blender auto-name) instead of
+  //      the UE5-convention "root".
+  //   2. Every bone chain ends in *_end / *_end_end artifact leaves (Maya /
+  //      3ds Max convention for tail orientation) that UE5 imports as junk
+  //      sockets and tries to skin to.
+  // We rename the deform root to "root" and strip every "_end$" bone before
+  // any FBX export so the entire delivery is consistent.
+  log("");
+  log("## §9.5 — skeleton hygiene (rename root + strip _end leaves)");
+  log("");
+
+  const bonesAudit = await step("/bone/list (find root)",
+    () => blenderPost("/bone/list", { armatureObjectName: armName }));
+  if (bonesAudit?.ok && bonesAudit.data?.bones) {
+    const bones = bonesAudit.data.bones;
+    const byName = new Map(bones.map(b => [b.name, b]));
+    // Walk UP from spine_root to find its topmost ancestor — that's the real
+    // UE5 root. Multiple parent=null deform bones exist in this rig (drv_bone,
+    // ik_foot_root, ik_hand_root, etc.) so we can't just pick "the orphan".
+    let anchor = byName.get("spine_root") ?? byName.get("pelvis") ?? null;
+    let rootName = null;
+    while (anchor) {
+      if (anchor.parent === null) { rootName = anchor.name; break; }
+      anchor = byName.get(anchor.parent) ?? null;
+    }
+    if (rootName === null) {
+      // Fallback: the unique deform orphan, if there is one.
+      const orphans = bones.filter(b => b.parent === null && b.useDeform);
+      if (orphans.length === 1) rootName = orphans[0].name;
+    }
+    if (rootName && rootName !== "root") {
+      await step(`/bone/rename ${rootName} → root`,
+        () => blenderPost("/bone/rename", {
+          armatureObjectName: armName,
+          oldName: rootName,
+          newName: "root",
+        }));
+    } else if (rootName === "root") {
+      log(`> root bone already named "root"`);
+    } else {
+      log("> ⚠ could not unambiguously identify the spine ancestor — skipping root rename");
+    }
+  }
+
+  // Delete every bone whose name ends in "_end" (covers _end and _end_end since
+  // we sort by depth descending in /bone/delete_by_pattern).
+  const dryRun = await step("/bone/delete_by_pattern _end$ (dry run)",
+    () => blenderPost("/bone/delete_by_pattern", {
+      armatureObjectName: armName,
+      pattern: "_end$",
+      dryRun: true,
+    }));
+  if (dryRun?.ok && dryRun.data?.matchedCount) {
+    log(`> would delete ${dryRun.data.matchedCount} _end artifact bones`);
+    await step("/bone/delete_by_pattern _end$ (commit)",
+      () => blenderPost("/bone/delete_by_pattern", {
+        armatureObjectName: armName,
+        pattern: "_end$",
+        dryRun: false,
+      }));
+  }
+
   // ── §10 ── export skeletal FBX → delivery/skeleton/ ──────────────────────
   log("");
   log("## §10 — export SK_Manuel_Set00.fbx (mesh + bind pose)");
   log("");
   const skPath = join(D_SK, "SK_Manuel_Set00.fbx");
-  await step("/export/fbx_skeletal -Y/Z bakeSpaceTransform",
+  await step("/export/fbx_skeletal -Y/Z bakeSpaceTransform allBones",
     () => blenderPost("/export/fbx_skeletal", {
       filepath: skPath,
       armatureObjectName: armName,
@@ -443,6 +507,7 @@ async function main() {
       axisUp: "Z",
       bakeSpaceTransform: true,
       addLeafBones: false,
+      useArmatureDeformOnly: false,
       primaryBoneAxis: "Y",
       secondaryBoneAxis: "X",
     }));
@@ -466,6 +531,8 @@ async function main() {
       globalScale: 1.0, applyUnitScale: true,
       axisForward: "-Y", axisUp: "Z",
       bakeSpaceTransform: true, addLeafBones: false,
+      useArmatureDeformOnly: false,
+      useNlaStrips: false,
       primaryBoneAxis: "Y", secondaryBoneAxis: "X",
     }));
   if (existsSync(aimPath)) {
@@ -590,6 +657,8 @@ async function main() {
           globalScale: 1.0, applyUnitScale: true,
           axisForward: "-Y", axisUp: "Z",
           bakeSpaceTransform: true, addLeafBones: false,
+          useArmatureDeformOnly: false,
+          useNlaStrips: false,
           primaryBoneAxis: "Y", secondaryBoneAxis: "X",
         });
         if (exp.ok && existsSync(outPath)) {
@@ -605,6 +674,108 @@ async function main() {
   log("");
   await step("/file/save",
     () => blenderPost("/file/save", {}));
+
+  // ── §14 ── reimport-verify every delivery FBX ────────────────────────────
+  // For each FBX in the delivery tree, open a brand-new scene, import the FBX,
+  // and assert:
+  //   - An armature was imported.
+  //   - It has a "root" bone (UE5 convention).
+  //   - It contains NO "_end" leaf artifacts.
+  //   - Animation FBXs contain at least one action with bone keyframes.
+  // Results land in VERIFICATION.md alongside the delivery. The Blender scene
+  // is trashed during this phase — the user reopens _Master_PROD.blend after.
+  log("");
+  log("## §14 — reimport-verify every delivery FBX");
+  log("");
+
+  /** @type {{ filepath: string, kind: 'skeleton'|'animation', ok: boolean, reasons: string[], boneCount: number, actionCount: number }[]} */
+  const verifyResults = [];
+  const verifyTargets = [];
+  for (const sub of ["skeleton", "aim", "locomotion", "throw"]) {
+    const dir = join(DELIVERY, sub);
+    if (!existsSync(dir)) continue;
+    for (const f of readdirSync(dir).filter(n => n.toLowerCase().endsWith(".fbx"))) {
+      verifyTargets.push({
+        filepath: join(dir, f),
+        kind: sub === "skeleton" ? "skeleton" : "animation",
+      });
+    }
+  }
+  log(`> ${verifyTargets.length} FBX to verify`);
+
+  for (const t of verifyTargets) {
+    const r = await step(`verify ${basename(t.filepath)}`,
+      async () => {
+        const nf = await blenderPost("/file/new", { empty: true });
+        if (!nf.ok) return nf;
+        const imp = await blenderPost("/import/fbx", { filepath: t.filepath });
+        if (!imp.ok) return imp;
+
+        const objs = await blenderPost("/object/list", { typeFilter: "ARMATURE" });
+        const arms = objs?.data?.objects ?? [];
+        if (arms.length === 0) {
+          verifyResults.push({ filepath: t.filepath, kind: t.kind, ok: false, reasons: ["no armature imported"], boneCount: 0, actionCount: 0 });
+          return { ok: true };
+        }
+        const armNameImp = arms[0].name;
+
+        const reasons = [];
+        const blist = await blenderPost("/bone/list", { armatureObjectName: armNameImp });
+        const bones = blist?.data?.bones ?? [];
+        const boneCount = bones.length;
+        const hasRoot = bones.some(b => b.name === "root");
+        if (!hasRoot) reasons.push(`no "root" bone (have: ${bones.filter(b => b.parent === null).map(b => b.name).join(", ") || "none"})`);
+        const endLeaves = bones.filter(b => b.name.endsWith("_end"));
+        if (endLeaves.length > 0) reasons.push(`${endLeaves.length} _end leaf artifacts still present: ${endLeaves.slice(0, 3).map(b => b.name).join(", ")}${endLeaves.length > 3 ? "..." : ""}`);
+
+        let actionCount = 0;
+        if (t.kind === "animation") {
+          const acts = await blenderPost("/action/list", {});
+          const allActions = acts?.data?.actions ?? [];
+          const boneActions = [];
+          for (const a of allActions) {
+            const insp = await blenderPost("/action/inspect", { actionName: a.name });
+            if (insp?.data?.hasBoneFcurves) boneActions.push(a.name);
+          }
+          actionCount = boneActions.length;
+          if (actionCount === 0) reasons.push("no action with bone keyframes after reimport");
+        }
+
+        const ok = reasons.length === 0;
+        verifyResults.push({ filepath: t.filepath, kind: t.kind, ok, reasons, boneCount, actionCount });
+        return { ok: true };
+      });
+    if (!r?.ok) {
+      verifyResults.push({ filepath: t.filepath, kind: t.kind, ok: false, reasons: [`verify step failed: ${r?.errorCode ?? "unknown"}`], boneCount: 0, actionCount: 0 });
+    }
+  }
+
+  // Emit VERIFICATION.md
+  const verifyLines = ["# FBX reimport verification", ""];
+  const passed = verifyResults.filter(r => r.ok).length;
+  const failed = verifyResults.filter(r => !r.ok);
+  verifyLines.push(`- Total: **${verifyResults.length}**`);
+  verifyLines.push(`- Passed: **${passed}** ✅`);
+  verifyLines.push(`- Failed: **${failed.length}** ${failed.length ? "❌" : ""}`);
+  verifyLines.push("");
+  if (failed.length) {
+    verifyLines.push("## Failures");
+    verifyLines.push("");
+    for (const r of failed) {
+      verifyLines.push(`- **${basename(r.filepath)}** (${r.kind}): ${r.reasons.join("; ")}`);
+    }
+    verifyLines.push("");
+  }
+  verifyLines.push("## All results");
+  verifyLines.push("");
+  verifyLines.push("| FBX | Kind | Bones | Actions | Status |");
+  verifyLines.push("|---|---|---|---|---|");
+  for (const r of verifyResults) {
+    verifyLines.push(`| ${basename(r.filepath)} | ${r.kind} | ${r.boneCount} | ${r.actionCount} | ${r.ok ? "✅ OK" : "❌ " + r.reasons.join(", ")} |`);
+  }
+  const verifyPath = join(DELIVERY, "VERIFICATION.md");
+  writeFileSync(verifyPath, verifyLines.join("\n"));
+  log(`> VERIFICATION.md → ${passed}/${verifyResults.length} OK`);
 
   finalize(true);
 }
