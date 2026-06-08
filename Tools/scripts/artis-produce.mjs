@@ -291,7 +291,35 @@ async function main() {
       yawDegMax: 90,
       pitchDegMax: 45,
       frameStart: 1,
+      // Rig imported from FBX faces -Y → flip pitch axis so pitch+ = look up
+      yawAxisWorld: [0, 0, 1],
+      pitchAxisWorld: [-1, 0, 0],
     }));
+
+  // 7b — validate the bake numerically (world-space yaw/pitch must match expected)
+  const aimVal = await step("/aim_offset/validate_9_pose_matrix",
+    () => blenderPost("/aim_offset/validate_9_pose_matrix", {
+      armatureObjectName: armName,
+      actionName: "AimOffset_Char",
+      probeBoneName: "head_01",
+      yawDegMax: 90,
+      pitchDegMax: 45,
+      frameStart: 1,
+      toleranceDeg: 5.0,
+      yawAxisWorld: [0, 0, 1],
+      pitchAxisWorld: [-1, 0, 0],
+    }));
+  if (aimVal?.ok && aimVal.data) {
+    log(`> AimOffset bake validation: maxErrorDeg=${aimVal.data.maxErrorDeg}° allPass=${aimVal.data.allPass}`);
+    if (!aimVal.data.allPass) {
+      log("> ⚠ AimOffset poses do NOT match expected world rotations — bake is broken");
+      for (const p of aimVal.data.poses) {
+        if (!p.pass) {
+          log(`>    f${p.frame}: expected yaw ${p.expectedYawDeg}°/pitch ${p.expectedPitchDeg}° — angleErr ${p.angleErrorDeg}° (reported actual yaw ${p.actualYawDeg}° pitch ${p.actualPitchDeg}° from ZXY decomposition)`);
+        }
+      }
+    }
+  }
 
   // ── §8 ── validation (ARTIS §5.2) ─────────────────────────────────────────
   log("");
