@@ -113,6 +113,69 @@ export function registerArmatureTools(server: McpServer): void {
       },
       handler: passthroughPost("/armature/rename_to_ue5_convention"),
     },
+    {
+      name: "armature_parent_with_auto_weights",
+      description:
+        "Parent meshes to an armature with automatic skin weights (wraps bpy.ops.object.parent_set). Creates per-bone vertex groups + an Armature modifier on every child mesh. ARMATURE_AUTO uses bone heat (best quality, requires manifold mesh); ARMATURE_NAME only matches bones to existing vertex group names; ARMATURE_ENVELOPE uses bone envelopes.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object (becomes parent)."),
+        meshObjectNames: z.array(z.string()).min(1).describe("Mesh children to parent."),
+        type: z
+          .enum(["ARMATURE_AUTO", "ARMATURE_NAME", "ARMATURE_ENVELOPE", "ARMATURE"])
+          .optional()
+          .describe("Weighting algorithm (default ARMATURE_AUTO — bone heat)."),
+        keepTransform: z
+          .boolean()
+          .optional()
+          .describe("Preserve world transform of children (default true)."),
+      },
+      handler: passthroughPost("/armature/parent_with_auto_weights"),
+    },
+    {
+      name: "armature_pose_mirror",
+      description:
+        "Mirror the current pose across the rig's X axis (left/right symmetry). Wraps pose.copy + pose.paste(flipped=True). Bones must follow standard _l/_r or .L/.R suffix convention.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        boneNames: z
+          .array(z.string())
+          .optional()
+          .describe("Restrict mirror to these pose bones (default: all)."),
+      },
+      handler: passthroughPost("/armature/pose_mirror"),
+    },
+    {
+      name: "armature_pose_snapshot",
+      description:
+        "Snapshot the current pose under a name. Stored as a custom property dictionary on the armature, so it survives .blend save/reload. Use armature_pose_apply to restore.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        poseName: z.string().describe("Unique pose key (e.g. 'TPose', 'walk_contact_L')."),
+      },
+      handler: passthroughPost("/armature/pose_snapshot"),
+    },
+    {
+      name: "armature_pose_apply",
+      description:
+        "Apply a previously snapshotted pose. Bones missing from the rig at apply time are reported in missingBones but don't fail the call.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        poseName: z.string().describe("Pose key from the library."),
+        boneNames: z
+          .array(z.string())
+          .optional()
+          .describe("Apply only to this subset (default: every bone in the snapshot)."),
+      },
+      handler: passthroughPost("/armature/pose_apply"),
+    },
+    {
+      name: "armature_pose_library_list",
+      description: "List every named pose stored on the armature.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+      },
+      handler: passthroughPost("/armature/pose_library_list"),
+    },
   ]);
 }
 
@@ -298,6 +361,44 @@ export function registerConstraintTools(server: McpServer): void {
       handler: passthroughPost("/bone/add_constraint"),
     },
     {
+      name: "bone_list_constraints",
+      description:
+        "List every constraint on a pose bone with type, enabled state, influence, target, and a flat params dict of common per-type attributes.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        boneName: z.string().describe("Pose bone name."),
+      },
+      handler: passthroughPost("/bone/list_constraints"),
+    },
+    {
+      name: "bone_remove_constraint",
+      description:
+        "Remove a named constraint from a pose bone. Idempotent: returns removed=false if the constraint doesn't exist.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        boneName: z.string().describe("Pose bone name."),
+        constraintName: z.string().describe("Constraint to remove."),
+      },
+      handler: passthroughPost("/bone/remove_constraint"),
+    },
+    {
+      name: "bone_update_constraint",
+      description:
+        "Update a bone constraint in place: enable/mute/influence + target + arbitrary params dict. Pass only the keys you want to change; others are preserved. Returns the post-update serialized constraint.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        boneName: z.string().describe("Pose bone name."),
+        constraintName: z.string().describe("Constraint to update."),
+        enabled: z.boolean().optional(),
+        mute: z.boolean().optional(),
+        influence: z.number().min(0).max(1).optional(),
+        targetObjectName: z.string().nullable().optional().describe("New target object (null = clear)."),
+        targetBoneName: z.string().nullable().optional().describe("New subtarget bone (null = clear)."),
+        params: z.record(z.unknown()).optional().describe("Per-type attributes (chain_count, use_x, etc)."),
+      },
+      handler: passthroughPost("/bone/update_constraint"),
+    },
+    {
       name: "object_add_constraint",
       description: "Add a constraint to an object.",
       inputSchema: {
@@ -308,6 +409,81 @@ export function registerConstraintTools(server: McpServer): void {
         params: z.record(z.unknown()).optional().describe("Property assignments."),
       },
       handler: passthroughPost("/object/add_constraint"),
+    },
+    {
+      name: "object_list_constraints",
+      description: "List every constraint on an object.",
+      inputSchema: { objectName: z.string().describe("Owner object.") },
+      handler: passthroughPost("/object/list_constraints"),
+    },
+    {
+      name: "object_remove_constraint",
+      description: "Remove a named constraint from an object. Idempotent.",
+      inputSchema: {
+        objectName: z.string().describe("Owner object."),
+        constraintName: z.string().describe("Constraint name."),
+      },
+      handler: passthroughPost("/object/remove_constraint"),
+    },
+    {
+      name: "object_update_constraint",
+      description: "Update an object constraint in place (target / enabled / mute / influence / params).",
+      inputSchema: {
+        objectName: z.string().describe("Owner object."),
+        constraintName: z.string().describe("Constraint name."),
+        enabled: z.boolean().optional(),
+        mute: z.boolean().optional(),
+        influence: z.number().min(0).max(1).optional(),
+        targetObjectName: z.string().nullable().optional(),
+        params: z.record(z.unknown()).optional(),
+      },
+      handler: passthroughPost("/object/update_constraint"),
+    },
+    {
+      name: "bone_set_custom_shape",
+      description:
+        "Assign a custom-shape display widget to a pose bone (hides default octahedron). Pass shapeObjectName=null to clear. wireframe=true forces armature-wide custom-shape display mode.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        boneName: z.string().describe("Pose bone."),
+        shapeObjectName: z
+          .string()
+          .nullable()
+          .describe("Mesh/empty object to use as shape. null clears."),
+        scaleXYZ: Vec3.optional().describe("custom_shape_scale_xyz."),
+        rotationEuler: Vec3.optional().describe("custom_shape_rotation_euler."),
+        translation: Vec3.optional().describe("custom_shape_translation."),
+        wireframe: z
+          .boolean()
+          .optional()
+          .describe("Enable arm.data.show_bone_custom_shapes."),
+        transformBoneName: z
+          .string()
+          .optional()
+          .describe("Make display follow another bone (custom_shape_transform)."),
+      },
+      handler: passthroughPost("/bone/set_custom_shape"),
+    },
+    {
+      name: "bone_ik_setup",
+      description:
+        "Composite atomic IK setup: optionally creates an IK target control bone at the IK bone's tail, optionally creates a pole-target bone at a chosen location, and wires an IK constraint with the right chain_count and pole_angle. One undo step. Use this instead of orchestrating bone_add + bone_add_constraint manually.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        ikBoneName: z.string().describe("Last bone in the chain (e.g. foot_l, hand_r)."),
+        chainCount: z.number().int().min(1).describe("Number of bones up the chain to solve for."),
+        createTargetBone: z.boolean().optional().describe("Create a control bone (default true)."),
+        targetBoneName: z.string().optional().describe("Use existing bone instead of creating one."),
+        createPoleBone: z.boolean().optional().describe("Create a pole-target bone (default false)."),
+        poleBoneName: z.string().optional().describe("Use existing pole bone."),
+        poleLocation: Vec3.optional().describe("World location for the created pole bone."),
+        poleAngle: z.number().optional().describe("Pole angle in radians (default -π/2)."),
+        constraintName: z.string().optional().describe("Constraint name (default 'IK')."),
+        influence: z.number().min(0).max(1).optional().describe("Constraint influence (default 1.0)."),
+        useTail: z.boolean().optional().describe("Solve to the bone's tail (default true)."),
+        useStretch: z.boolean().optional().describe("Allow stretch (default false)."),
+      },
+      handler: passthroughPost("/bone/ik_setup"),
     },
   ]);
 }

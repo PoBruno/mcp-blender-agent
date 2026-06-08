@@ -11,6 +11,7 @@ from ..helpers import (
     composite_undo,
     get_armature_object,
     get_collection,
+    get_object,
     set_active_and_selected,
     with_3dview_context,
     with_mode,
@@ -372,6 +373,297 @@ def armature_rename_to_ue5_convention(body: dict[str, Any]) -> dict[str, Any]:
             "armatureObjectName": arm.name,
             "renamedCount": len(renamed),
             "renames": renamed,
+        },
+        "refs": {"armatureName": arm.name},
+    }
+
+
+# ----------------------------------------------------------------------------
+# Skinning / pose composite tools
+# ----------------------------------------------------------------------------
+
+
+@handler("POST", "/armature/parent_with_auto_weights")
+def armature_parent_with_auto_weights(body: dict[str, Any]) -> dict[str, Any]:
+    """Parent meshes to an armature with automatic envelope/bone-heat weights.
+
+    Composite of `bpy.ops.object.parent_set(type=...)`. The armature becomes
+    parent, every mesh in `meshObjectNames` becomes a child with a generated
+    Armature modifier and per-bone vertex groups.
+
+    Body: {
+      armatureObjectName: str,
+      meshObjectNames: [str, ...],
+      type?: 'ARMATURE_AUTO' | 'ARMATURE_NAME' | 'ARMATURE_ENVELOPE'
+              | 'ARMATURE' (default 'ARMATURE_AUTO'),
+      keepTransform?: bool   // default true; preserves world position
+    }
+
+    Returns: { childObjectNames: [str], modifierName: str | null }
+    """
+    import bpy  # type: ignore
+
+    arm = get_armature_object(body.get("armatureObjectName"))
+    mesh_names = body.get("meshObjectNames") or []
+    if not mesh_names:
+        raise InvalidInputError("meshObjectNames is required (non-empty list)")
+    parent_type = body.get("type", "ARMATURE_AUTO")
+    if parent_type not in {"ARMATURE_AUTO", "ARMATURE_NAME", "ARMATURE_ENVELOPE", "ARMATURE"}:
+        raise InvalidInputError(
+            f"type {parent_type!r} not in ARMATURE_AUTO/NAME/ENVELOPE/ARMATURE"
+        )
+    keep_transform = bool(body.get("keepTransform", True))
+
+    meshes = []
+    for n in mesh_names:
+        o = get_object(n)
+        if o.type != "MESH":
+            raise InvalidInputError(f"{n!r} is not a MESH (type={o.type})")
+        meshes.append(o)
+
+    children: list[str] = []
+    with composite_undo(f"armature_parent_with_auto_weights:{arm.name}"):
+        for o in bpy.data.objects:
+            o.select_set(False)
+        for m in meshes:
+            m.select_set(True)
+        arm.select_set(True)
+        bpy.context.view_layer.objects.active = arm  # armature MUST be active
+
+        with with_3dview_context():
+            try:
+                bpy.ops.object.parent_set(
+                    type=parent_type,
+                    keep_transform=keep_transform,
+                )
+            except (RuntimeError, TypeError) as exc:
+                raise InvalidInputError(
+                    f"parent_set(type={parent_type!r}) failed: {exc}"
+                ) from exc
+
+        for m in meshes:
+            children.append(m.name)
+
+    return {
+        "ok": True,
+        "data": {
+            "armatureObjectName": arm.name,
+            "childObjectNames": children,
+            "type": parent_type,
+        },
+        "refs": {"armatureName": arm.name, "childObjectNames": children},
+    }
+
+
+# Default mirror suffix pairs — covers UE5 (.l/.r), Blender (_L/_R), legacy.
+_MIRROR_SUFFIX_PAIRS = (
+    (".l", ".r"),
+    (".L", ".R"),
+    ("_l", "_r"),
+    ("_L", "_R"),
+    (".left", ".right"),
+)
+
+
+def _mirror_bone_name(name: str) -> str:
+    """Return the L↔R mirror of a bone name. Returns name unchanged if no
+    suffix match."""
+    for a, b in _MIRROR_SUFFIX_PAIRS:
+        if name.endswith(a):
+            return name[: -len(a)] + b
+        if name.endswith(b):
+            return name[: -len(b)] + a
+    return name
+
+
+@handler("POST", "/armature/pose_mirror")
+def armature_pose_mirror(body: dict[str, Any]) -> dict[str, Any]:
+    """Mirror the current pose across the rig's local YZ plane (X-axis flip).
+
+    Wraps `bpy.ops.pose.copy` + `bpy.ops.pose.paste(flipped=True)`. Bone
+    naming must follow the standard L/R suffix convention; otherwise the paste
+    silently no-ops on unmatched bones.
+
+    Body: {
+      armatureObjectName: str,
+      boneNames?: [str, ...]  // restrict to a subset; default = all pose bones
+    }
+
+    Returns: { mirroredCount, bones: [{from, to}] }
+    """
+    import bpy  # type: ignore
+
+    arm = get_armature_object(body.get("armatureObjectName"))
+    only = body.get("boneNames")
+    if only is not None and not isinstance(only, list):
+        raise InvalidInputError("boneNames must be a list")
+
+    pose_bones = arm.pose.bones
+    targets = (
+        [pose_bones[n] for n in only if n in pose_bones]
+        if only is not None
+        else list(pose_bones)
+    )
+    if only is not None:
+        missing = [n for n in only if n not in pose_bones]
+        if missing:
+            raise BoneNotFoundError(f"bones not in armature: {missing}")
+
+    mirrored: list[dict[str, str]] = []
+    with composite_undo(f"armature_pose_mirror:{arm.name}"):
+        set_active_and_selected(arm)
+        with with_mode(arm, "POSE"):
+            for pb in pose_bones:
+                pb.bone.select = False
+            for pb in targets:
+                pb.bone.select = True
+
+            with with_3dview_context():
+                try:
+                    bpy.ops.pose.copy()
+                    bpy.ops.pose.paste(flipped=True)
+                except (RuntimeError, TypeError) as exc:
+                    raise InvalidInputError(f"pose mirror failed: {exc}") from exc
+
+            for pb in targets:
+                mirrored.append({"from": pb.name, "to": _mirror_bone_name(pb.name)})
+
+    return {
+        "ok": True,
+        "data": {
+            "armatureObjectName": arm.name,
+            "mirroredCount": len(mirrored),
+            "bones": mirrored,
+        },
+        "refs": {"armatureName": arm.name},
+    }
+
+
+def _snapshot_pose(arm: Any) -> dict[str, dict[str, list[float]]]:
+    """Capture every pose bone's location/rotation_quaternion/scale."""
+    snap: dict[str, dict[str, list[float]]] = {}
+    for pb in arm.pose.bones:
+        snap[pb.name] = {
+            "location": list(pb.location),
+            "rotation_quaternion": list(pb.rotation_quaternion),
+            "rotation_euler": list(pb.rotation_euler),
+            "rotation_mode": pb.rotation_mode,
+            "scale": list(pb.scale),
+        }
+    return snap
+
+
+@handler("POST", "/armature/pose_snapshot")
+def armature_pose_snapshot(body: dict[str, Any]) -> dict[str, Any]:
+    """Capture the current pose and store it under a name on the armature.
+
+    Poses live in `arm['_pose_library']` (custom property) keyed by name.
+    Body: { armatureObjectName: str, poseName: str }
+    Returns: { poseName, boneCount }
+    """
+    arm = get_armature_object(body.get("armatureObjectName"))
+    name = body.get("poseName")
+    if not name:
+        raise InvalidInputError("poseName is required")
+
+    with composite_undo(f"armature_pose_snapshot:{arm.name}/{name}"):
+        snap = _snapshot_pose(arm)
+        lib = arm.get("_pose_library") or {}
+        # Bone IDProperty values aren't all natively serializable — Blender's
+        # IDProperty supports dict / list / primitive nesting; this works.
+        lib_dict = dict(lib) if hasattr(lib, "keys") else {}
+        lib_dict[name] = snap
+        arm["_pose_library"] = lib_dict
+
+    return {
+        "ok": True,
+        "data": {
+            "armatureObjectName": arm.name,
+            "poseName": name,
+            "boneCount": len(snap),
+        },
+        "refs": {"armatureName": arm.name, "poseName": name},
+    }
+
+
+@handler("POST", "/armature/pose_apply")
+def armature_pose_apply(body: dict[str, Any]) -> dict[str, Any]:
+    """Apply a previously snapshotted pose to the armature.
+
+    Body: {
+      armatureObjectName: str,
+      poseName: str,
+      boneNames?: [str, ...]   // restrict to subset
+    }
+    Returns: { appliedCount, missingBones }
+    """
+    arm = get_armature_object(body.get("armatureObjectName"))
+    name = body.get("poseName")
+    if not name:
+        raise InvalidInputError("poseName is required")
+    only = body.get("boneNames")
+    only_set = set(only) if isinstance(only, list) else None
+
+    lib = arm.get("_pose_library")
+    if lib is None or name not in (lib.keys() if hasattr(lib, "keys") else dict(lib)):
+        raise InvalidInputError(
+            f"pose {name!r} not found in armature {arm.name!r} pose library"
+        )
+    snap = lib[name]
+
+    applied = 0
+    missing: list[str] = []
+    with composite_undo(f"armature_pose_apply:{arm.name}/{name}"):
+        with with_mode(arm, "POSE"):
+            for bname, ch in dict(snap).items():
+                if only_set is not None and bname not in only_set:
+                    continue
+                pb = arm.pose.bones.get(bname)
+                if pb is None:
+                    missing.append(bname)
+                    continue
+                ch = dict(ch)
+                if "rotation_mode" in ch:
+                    pb.rotation_mode = str(ch["rotation_mode"])
+                if "location" in ch:
+                    pb.location = tuple(ch["location"])
+                if "rotation_quaternion" in ch:
+                    pb.rotation_quaternion = tuple(ch["rotation_quaternion"])
+                if "rotation_euler" in ch:
+                    pb.rotation_euler = tuple(ch["rotation_euler"])
+                if "scale" in ch:
+                    pb.scale = tuple(ch["scale"])
+                applied += 1
+
+    return {
+        "ok": True,
+        "data": {
+            "armatureObjectName": arm.name,
+            "poseName": name,
+            "appliedCount": applied,
+            "missingBones": missing,
+        },
+        "refs": {"armatureName": arm.name, "poseName": name},
+    }
+
+
+@handler("POST", "/armature/pose_library_list")
+def armature_pose_library_list(body: dict[str, Any]) -> dict[str, Any]:
+    """List every named pose stored on the armature."""
+    arm = get_armature_object(body.get("armatureObjectName"))
+    lib = arm.get("_pose_library")
+    names: list[str] = []
+    if lib is not None:
+        try:
+            names = sorted(lib.keys() if hasattr(lib, "keys") else dict(lib).keys())
+        except (TypeError, AttributeError):
+            names = []
+    return {
+        "ok": True,
+        "data": {
+            "armatureObjectName": arm.name,
+            "count": len(names),
+            "poseNames": names,
         },
         "refs": {"armatureName": arm.name},
     }

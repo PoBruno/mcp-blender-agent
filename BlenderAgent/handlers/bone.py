@@ -9,6 +9,7 @@ from ..helpers import (
     InvalidInputError,
     composite_undo,
     get_armature_object,
+    get_object,
     set_active_and_selected,
     with_3dview_context,
     with_mode,
@@ -456,4 +457,203 @@ def bone_recalculate_roll(body: dict[str, Any]) -> dict[str, Any]:
             "bones": rolls_after,
         },
         "refs": {"armatureName": arm.name},
+    }
+
+
+# ----------------------------------------------------------------------------
+# Bone display widget (custom shape) + composite IK setup
+# ----------------------------------------------------------------------------
+
+
+@handler("POST", "/bone/set_custom_shape")
+def bone_set_custom_shape(body: dict[str, Any]) -> dict[str, Any]:
+    """Assign a custom-shape display object to a pose bone.
+
+    Body: {armatureObjectName: str, boneName: str,
+           shapeObjectName: str | null,  // null clears the custom shape
+           scaleXYZ?: [x,y,z],           // custom_shape_scale_xyz
+           rotationEuler?: [x,y,z],      // custom_shape_rotation_euler
+           translation?: [x,y,z],        // custom_shape_translation
+           wireframe?: bool,             // arm.data.show_bone_custom_shapes
+           transformBoneName?: str       // custom_shape_transform (display follows another bone)
+           }
+
+    Custom shapes are mesh / empty objects used as pose-bone display widgets.
+    Hides the bone octahedron and replaces it with the shape — standard rig
+    UX for animators.
+    """
+    arm = get_armature_object(body.get("armatureObjectName"))
+    bone_name = body.get("boneName")
+    if not bone_name:
+        raise InvalidInputError("boneName is required")
+    pb = arm.pose.bones.get(bone_name)
+    if pb is None:
+        raise BoneNotFoundError(f"pose bone {bone_name!r} not found")
+
+    shape_name = body.get("shapeObjectName")
+    with composite_undo(f"bone_set_custom_shape:{arm.name}/{bone_name}"):
+        pb.custom_shape = get_object(shape_name) if shape_name else None
+        if "scaleXYZ" in body:
+            pb.custom_shape_scale_xyz = tuple(body["scaleXYZ"])
+        if "rotationEuler" in body:
+            pb.custom_shape_rotation_euler = tuple(body["rotationEuler"])
+        if "translation" in body:
+            pb.custom_shape_translation = tuple(body["translation"])
+        if "transformBoneName" in body:
+            t = body["transformBoneName"]
+            pb.custom_shape_transform = arm.pose.bones.get(t) if t else None
+        if "wireframe" in body:
+            arm.data.show_bone_custom_shapes = bool(body["wireframe"])
+
+    return {
+        "ok": True,
+        "data": {
+            "armatureObjectName": arm.name,
+            "boneName": bone_name,
+            "shapeObjectName": pb.custom_shape.name if pb.custom_shape else None,
+        },
+        "refs": {"armatureName": arm.name, "boneName": bone_name},
+    }
+
+
+@handler("POST", "/bone/ik_setup")
+def bone_ik_setup(body: dict[str, Any]) -> dict[str, Any]:
+    """Set up an IK chain on an existing pose bone in ONE atomic step.
+
+    Composite of:
+      1. (optional) Create an IK target control bone at the IK bone's tail.
+      2. (optional) Create a pole target bone at a user-supplied location.
+      3. Add a single IK constraint on the IK bone, wired to those targets.
+
+    Body: {
+      armatureObjectName: str,
+      ikBoneName: str,                 # the last bone in the chain (foot, hand)
+      chainCount: int,                 # bones up the chain to solve for
+      // target control bone:
+      createTargetBone?: bool,         # default true — appends '<ikBoneName>_IK'
+      targetBoneName?: str,            # use existing instead of creating
+      // pole:
+      createPoleBone?: bool,           # default false
+      poleBoneName?: str,
+      poleLocation?: [x,y,z],          # world-space location for created pole
+      poleAngle?: float,               # radians; default -pi/2
+      // constraint params:
+      constraintName?: str,            # default 'IK'
+      influence?: float,               # default 1.0
+      useTail?: bool,                  # constraint.use_tail (default true)
+      useStretch?: bool,               # use_stretch (default false)
+    }
+
+    Returns the created bone names + constraint name. Target & pole bones are
+    automatically detached (no parent → free-floating control).
+    """
+    import bpy  # type: ignore
+
+    arm = get_armature_object(body.get("armatureObjectName"))
+    ik_bone_name = body.get("ikBoneName")
+    chain_count = body.get("chainCount")
+    if not ik_bone_name or chain_count is None:
+        raise InvalidInputError("ikBoneName and chainCount are required")
+    chain_count = int(chain_count)
+    if chain_count < 1:
+        raise InvalidInputError("chainCount must be >= 1")
+
+    create_target = body.get("createTargetBone", True)
+    target_name = body.get("targetBoneName")
+    create_pole = body.get("createPoleBone", False)
+    pole_name = body.get("poleBoneName")
+    pole_location = body.get("poleLocation")
+    pole_angle = float(body.get("poleAngle", -1.5707963267948966))  # -pi/2
+    constraint_name = body.get("constraintName") or "IK"
+    influence = float(body.get("influence", 1.0))
+    use_tail = bool(body.get("useTail", True))
+    use_stretch = bool(body.get("useStretch", False))
+
+    created_bones: list[str] = []
+
+    with composite_undo(f"bone_ik_setup:{arm.name}/{ik_bone_name}"):
+        set_active_and_selected(arm)
+
+        # ── EDIT mode: create target + pole bones if requested ──────────────
+        with with_mode(arm, "EDIT"):
+            eb = arm.data.edit_bones
+            if ik_bone_name not in eb:
+                raise BoneNotFoundError(f"bone {ik_bone_name!r} not in armature")
+            ik_eb = eb[ik_bone_name]
+
+            if create_target and target_name is None:
+                target_name = f"{ik_bone_name}_IK"
+            if create_target and target_name not in eb:
+                tb = eb.new(target_name)
+                # Place at the IK bone's tail, length = bone length
+                head = ik_eb.tail.copy()
+                tail = head.copy()
+                length = (ik_eb.tail - ik_eb.head).length
+                tail.z += length if length > 0 else 0.1
+                tb.head = head
+                tb.tail = tail
+                tb.parent = None  # free-floating control
+                tb.use_deform = False
+                created_bones.append(target_name)
+
+            if create_pole and pole_name is None:
+                pole_name = f"{ik_bone_name}_pole"
+            if create_pole and pole_name not in eb:
+                pb_edit = eb.new(pole_name)
+                if pole_location is not None:
+                    pb_edit.head = tuple(pole_location)
+                else:
+                    # Default: 1m in front of the IK bone's head along world +Y
+                    h = ik_eb.head.copy()
+                    h.y += 1.0
+                    pb_edit.head = h
+                tail = pb_edit.head.copy()
+                tail.z += 0.1
+                pb_edit.tail = tail
+                pb_edit.parent = None
+                pb_edit.use_deform = False
+                created_bones.append(pole_name)
+
+        # ── POSE mode: add the IK constraint ────────────────────────────────
+        with with_mode(arm, "POSE"):
+            pose_ik = arm.pose.bones.get(ik_bone_name)
+            if pose_ik is None:
+                raise BoneNotFoundError(f"pose bone {ik_bone_name!r} not found")
+            # Remove any existing IK constraint with same name first
+            existing = pose_ik.constraints.get(constraint_name)
+            if existing is not None:
+                pose_ik.constraints.remove(existing)
+            try:
+                c = pose_ik.constraints.new(type="IK")
+            except (RuntimeError, TypeError) as exc:
+                raise InvalidInputError(f"IK constraint creation failed: {exc}") from exc
+            c.name = constraint_name
+            c.chain_count = chain_count
+            c.influence = influence
+            c.use_tail = use_tail
+            c.use_stretch = use_stretch
+            if target_name:
+                c.target = arm
+                c.subtarget = target_name
+            if pole_name:
+                c.pole_target = arm
+                c.pole_subtarget = pole_name
+                c.pole_angle = pole_angle
+
+    return {
+        "ok": True,
+        "data": {
+            "armatureObjectName": arm.name,
+            "ikBoneName": ik_bone_name,
+            "constraintName": constraint_name,
+            "targetBoneName": target_name,
+            "poleBoneName": pole_name,
+            "chainCount": chain_count,
+            "createdBones": created_bones,
+        },
+        "refs": {
+            "armatureName": arm.name,
+            "boneName": ik_bone_name,
+            "constraintName": constraint_name,
+        },
     }
