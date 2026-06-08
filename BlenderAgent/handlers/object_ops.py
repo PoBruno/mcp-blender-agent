@@ -290,3 +290,130 @@ def mesh_parent_to_armature(body: dict[str, Any]) -> dict[str, Any]:
             "modifierName": mod.name,
         },
     }
+
+
+@handler("POST", "/object/list")
+def object_list(body: dict[str, Any]) -> dict[str, Any]:
+    """List every object in bpy.data.objects with type/location/parent/collection.
+
+    Body: {typeFilter?: str | [str, ...] (e.g. "ARMATURE" or ["MESH","ARMATURE"]),
+           namePattern?: str (substring filter, case-sensitive),
+           collectionName?: str (only objects in this collection)}
+
+    Pure read; never mutates. Use to discover armatures, meshes, lights, sockets
+    in a loaded .blend before chaining other tools.
+    """
+    import bpy  # type: ignore
+
+    type_filter = body.get("typeFilter")
+    if isinstance(type_filter, str):
+        type_filter = [type_filter]
+    if type_filter:
+        type_filter = {t.upper() for t in type_filter}
+
+    name_pat = body.get("namePattern")
+    coll_name = body.get("collectionName")
+    coll_obj_names: set[str] | None = None
+    if coll_name:
+        if coll_name not in bpy.data.collections:
+            raise InvalidInputError(f"collection {coll_name!r} not found")
+        coll_obj_names = {o.name for o in bpy.data.collections[coll_name].objects}
+
+    items: list[dict[str, Any]] = []
+    for o in bpy.data.objects:
+        if type_filter and o.type not in type_filter:
+            continue
+        if name_pat and name_pat not in o.name:
+            continue
+        if coll_obj_names is not None and o.name not in coll_obj_names:
+            continue
+        items.append(
+            {
+                "name": o.name,
+                "type": o.type,
+                "location": list(o.location),
+                "rotationEuler": list(o.rotation_euler),
+                "scale": list(o.scale),
+                "parent": o.parent.name if o.parent else None,
+                "childrenCount": len(o.children),
+                "modifierCount": len(o.modifiers) if hasattr(o, "modifiers") else 0,
+                "collections": [c.name for c in o.users_collection],
+                "hide": bool(o.hide_get()),
+            }
+        )
+
+    return {
+        "ok": True,
+        "data": {"count": len(items), "objects": items},
+    }
+
+
+@handler("POST", "/object/get_info")
+def object_get_info(body: dict[str, Any]) -> dict[str, Any]:
+    """Deep introspection of a single object — children, modifiers, animation,
+    data block summary.
+
+    Body: {objectName: str}
+
+    Returns parent/children/modifiers, plus type-specific summary:
+      - MESH: vertex/edge/face count, vertex_group names, material slots
+      - ARMATURE: bone count, action name, sockets (SOCKET_ prefixed children)
+      - EMPTY: empty_display_type, size
+    """
+    obj = get_object(body.get("objectName"))
+
+    info: dict[str, Any] = {
+        "name": obj.name,
+        "type": obj.type,
+        "location": list(obj.location),
+        "rotationEuler": list(obj.rotation_euler),
+        "scale": list(obj.scale),
+        "dimensions": list(obj.dimensions),
+        "parent": obj.parent.name if obj.parent else None,
+        "parentType": obj.parent_type if obj.parent else None,
+        "parentBone": obj.parent_bone if obj.parent else "",
+        "children": [c.name for c in obj.children],
+        "collections": [c.name for c in obj.users_collection],
+        "modifiers": [
+            {"name": m.name, "type": m.type} for m in (obj.modifiers or [])
+        ] if hasattr(obj, "modifiers") else [],
+        "animation": {
+            "hasAnimData": obj.animation_data is not None,
+            "actionName": obj.animation_data.action.name
+            if obj.animation_data and obj.animation_data.action else None,
+            "nlaTrackCount": len(obj.animation_data.nla_tracks)
+            if obj.animation_data else 0,
+        },
+    }
+
+    if obj.type == "MESH":
+        me = obj.data
+        info["mesh"] = {
+            "vertices": len(me.vertices),
+            "edges": len(me.edges),
+            "polygons": len(me.polygons),
+            "uvLayers": [u.name for u in me.uv_layers],
+            "vertexGroups": [vg.name for vg in obj.vertex_groups],
+            "materialSlots": [
+                {"slot": i, "materialName": s.material.name if s.material else None}
+                for i, s in enumerate(obj.material_slots)
+            ],
+            "shapeKeys": [k.name for k in me.shape_keys.key_blocks] if me.shape_keys else [],
+        }
+    elif obj.type == "ARMATURE":
+        arm = obj.data
+        sockets = [c.name for c in obj.children if c.name.startswith("SOCKET_")]
+        info["armature"] = {
+            "boneCount": len(arm.bones),
+            "boneNames": [b.name for b in arm.bones],
+            "sockets": sockets,
+            "showInFront": bool(obj.show_in_front),
+        }
+    elif obj.type == "EMPTY":
+        info["empty"] = {
+            "displayType": obj.empty_display_type,
+            "displaySize": float(obj.empty_display_size),
+        }
+
+    return {"ok": True, "data": info, "refs": {"objectName": obj.name}}
+

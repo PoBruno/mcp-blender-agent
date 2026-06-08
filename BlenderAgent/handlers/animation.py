@@ -6,11 +6,13 @@ from typing import Any
 
 from ..helpers import (
     ActionNotFoundError,
+    BoneNotFoundError,
     InvalidInputError,
     composite_undo,
     get_action,
     get_armature_object,
     get_object,
+    with_mode,
 )
 from ..server import handler
 
@@ -32,6 +34,78 @@ def action_create(body: dict[str, Any]) -> dict[str, Any]:
         act = bpy.data.actions.new(name=name)
     return {"ok": True, "data": {"actionName": act.name, "created": True},
             "refs": {"actionName": act.name}}
+
+
+def _action_fcurve_count(act: Any) -> int:
+    """Count fcurves on an action across both legacy and Blender 4.4+ layered APIs.
+
+    Legacy actions: act.fcurves (flat list).
+    Layered actions: act.slots[*].channelbags(layer)[*].fcurves (nested).
+    """
+    # Legacy path — Blender < 4.4 or actions still in legacy mode.
+    fc = getattr(act, "fcurves", None)
+    if fc is not None:
+        try:
+            return len(fc)
+        except TypeError:
+            pass
+
+    # Layered path — Blender 4.4+
+    layers = getattr(act, "layers", None)
+    slots = getattr(act, "slots", None)
+    if layers is None or slots is None:
+        return 0
+    total = 0
+    for layer in layers:
+        for strip in getattr(layer, "strips", []):
+            for slot in slots:
+                cb = None
+                if hasattr(strip, "channelbag"):
+                    try:
+                        cb = strip.channelbag(slot)
+                    except (RuntimeError, TypeError):
+                        cb = None
+                if cb is not None and hasattr(cb, "fcurves"):
+                    try:
+                        total += len(cb.fcurves)
+                    except TypeError:
+                        pass
+    return total
+
+
+@handler("POST", "/action/list")
+def action_list(body: dict[str, Any]) -> dict[str, Any]:
+    """List every action in bpy.data.actions with frame range + fcurve count.
+
+    Body: {namePattern?: str (substring filter)}
+
+    Pure read; never mutates. Used to discover existing animations in a loaded
+    .blend (e.g. before exporting each action to its own FBX). Handles both the
+    legacy and Blender 4.4+ layered action APIs.
+    """
+    import bpy  # type: ignore
+
+    pattern = body.get("namePattern")
+    items: list[dict[str, Any]] = []
+    for act in bpy.data.actions:
+        if pattern and pattern not in act.name:
+            continue
+        fr = act.frame_range
+        items.append(
+            {
+                "name": act.name,
+                "frameStart": float(fr[0]),
+                "frameEnd": float(fr[1]),
+                "frameCount": int(fr[1] - fr[0]) + 1,
+                "fcurveCount": _action_fcurve_count(act),
+                "slotCount": len(getattr(act, "slots", []) or []),
+                "useFakeUser": bool(act.use_fake_user),
+                "users": int(act.users),
+                "isLegacy": bool(getattr(act, "is_action_legacy", False)),
+                "isLayered": bool(getattr(act, "is_action_layered", False)),
+            }
+        )
+    return {"ok": True, "data": {"count": len(items), "actions": items}}
 
 
 @handler("POST", "/action/assign_to_object")
@@ -117,6 +191,128 @@ def keyframe_bone_pose(body: dict[str, Any]) -> dict[str, Any]:
             "boneName": bone_name,
             "actionName": arm.animation_data.action.name
             if arm.animation_data and arm.animation_data.action else "",
+        },
+    }
+
+
+@handler("POST", "/aim_offset/bake_9_pose_matrix")
+def aim_offset_bake_9_pose_matrix(body: dict[str, Any]) -> dict[str, Any]:
+    """Bake a 9-pose AimOffset (3x3 yaw/pitch grid) by distributing rotation
+    across spine + neck + head bones (ARTIS §3.3).
+
+    Body: {
+      armatureObjectName: str,
+      actionName?: str (default 'AimOffset'),
+      spineBoneName: str,            # e.g. 'spine_02'
+      neckBoneName: str,             # e.g. 'neck_01'
+      headBoneName: str,             # e.g. 'head_01'
+      yawWeights?: [spine, neck, head],   # default [0.17, 0.22, 0.61] (60/40 split: 39% body, 61% head)
+      pitchWeights?: [spine, neck, head], # default [0.05, 0.15, 0.80] (briefing: pitch só na cabeça)
+      yawDegMax?: float,             # default 90
+      pitchDegMax?: float,           # default 45
+      frameStart?: int,              # default 1 (frames 1..9)
+    }
+
+    Frame layout (matches §3.3 table):
+       1: yaw -max, pitch +max     2: yaw  0,    pitch +max     3: yaw +max, pitch +max
+       4: yaw -max, pitch  0       5: yaw  0,    pitch  0       6: yaw +max, pitch  0
+       7: yaw -max, pitch -max     8: yaw  0,    pitch -max     9: yaw +max, pitch -max
+
+    Each bone gets its share (weight * angle) keyframed on the corresponding
+    frame. Center pose (frame 5) is the neutral rest pose. Bones not present
+    in the armature raise BONE_NOT_FOUND.
+    """
+    import math
+    import bpy  # type: ignore
+    from mathutils import Quaternion  # type: ignore
+
+    arm = get_armature_object(body.get("armatureObjectName"))
+    action_name = body.get("actionName") or "AimOffset"
+    spine_name = body.get("spineBoneName")
+    neck_name = body.get("neckBoneName")
+    head_name = body.get("headBoneName")
+    if not (spine_name and neck_name and head_name):
+        raise InvalidInputError(
+            "spineBoneName, neckBoneName, headBoneName are all required"
+        )
+
+    yaw_weights = body.get("yawWeights") or [0.17, 0.22, 0.61]
+    pitch_weights = body.get("pitchWeights") or [0.05, 0.15, 0.80]
+    yaw_max_deg = float(body.get("yawDegMax", 90.0))
+    pitch_max_deg = float(body.get("pitchDegMax", 45.0))
+    frame_start = int(body.get("frameStart", 1))
+
+    if len(yaw_weights) != 3 or len(pitch_weights) != 3:
+        raise InvalidInputError("yawWeights and pitchWeights must each be 3 floats (spine, neck, head)")
+
+    # Validate bones exist
+    pose_bones = arm.pose.bones
+    for n in (spine_name, neck_name, head_name):
+        if n not in pose_bones:
+            raise BoneNotFoundError(f"{n!r} not in armature {arm.name!r}")
+
+    bones = [
+        (spine_name, yaw_weights[0], pitch_weights[0]),
+        (neck_name, yaw_weights[1], pitch_weights[1]),
+        (head_name, yaw_weights[2], pitch_weights[2]),
+    ]
+
+    # 9-pose layout: (frame_offset, yaw_factor, pitch_factor) where factors ∈ {-1, 0, +1}
+    poses = [
+        (0, -1, +1), (1, 0, +1), (2, +1, +1),
+        (3, -1, 0),  (4, 0, 0),  (5, +1, 0),
+        (6, -1, -1), (7, 0, -1), (8, +1, -1),
+    ]
+
+    with composite_undo(f"aim_offset_bake:{arm.name}/{action_name}"):
+        # Ensure action exists and is assigned
+        if action_name in bpy.data.actions:
+            act = bpy.data.actions[action_name]
+        else:
+            act = bpy.data.actions.new(name=action_name)
+        if arm.animation_data is None:
+            arm.animation_data_create()
+        arm.animation_data.action = act
+
+        # Switch to pose mode for keyframing
+        with with_mode(arm, "POSE"):
+            for f_off, yaw_f, pitch_f in poses:
+                frame = frame_start + f_off
+                for bname, yaw_w, pitch_w in bones:
+                    pb = arm.pose.bones[bname]
+                    yaw_rad = math.radians(yaw_max_deg * yaw_f * yaw_w)
+                    pitch_rad = math.radians(pitch_max_deg * pitch_f * pitch_w)
+                    # Yaw around bone-local Z, pitch around bone-local X
+                    q_yaw = Quaternion((0.0, 0.0, 1.0), yaw_rad)
+                    q_pitch = Quaternion((1.0, 0.0, 0.0), pitch_rad)
+                    pb.rotation_mode = "QUATERNION"
+                    pb.rotation_quaternion = q_yaw @ q_pitch
+                    arm.keyframe_insert(
+                        data_path=f'pose.bones["{bname}"].rotation_quaternion',
+                        frame=frame,
+                    )
+            # Set scene frame range
+            scn = bpy.context.scene
+            scn.frame_start = frame_start
+            scn.frame_end = frame_start + 8
+
+    return {
+        "ok": True,
+        "data": {
+            "armatureObjectName": arm.name,
+            "actionName": act.name,
+            "frameStart": frame_start,
+            "frameEnd": frame_start + 8,
+            "poseCount": 9,
+            "bones": [
+                {"name": spine_name, "yawShare": yaw_weights[0], "pitchShare": pitch_weights[0]},
+                {"name": neck_name, "yawShare": yaw_weights[1], "pitchShare": pitch_weights[1]},
+                {"name": head_name, "yawShare": yaw_weights[2], "pitchShare": pitch_weights[2]},
+            ],
+        },
+        "refs": {
+            "armatureName": arm.name,
+            "actionName": act.name,
         },
     }
 

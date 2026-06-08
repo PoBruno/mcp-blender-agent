@@ -25,6 +25,59 @@ export function registerAnimationTools(server: McpServer): void {
       handler: passthroughPost("/action/assign_to_object"),
     },
     {
+      name: "action_list",
+      description:
+        "List every Action in bpy.data.actions with frame range, fcurve count, slot count, fake-user flag. Pure read — handles both legacy and Blender 4.4+ layered actions.",
+      inputSchema: {
+        namePattern: z
+          .string()
+          .optional()
+          .describe("Substring filter on action names."),
+      },
+      handler: passthroughPost("/action/list"),
+    },
+    {
+      name: "aim_offset_bake_9_pose_matrix",
+      description:
+        "Bake a 9-pose AimOffset (3x3 yaw/pitch grid) by distributing rotation across spine + neck + head bones (ARTIS §3.3 — 'cabeça gira mais que tronco'). Default weights split as 17/22/61% yaw and 5/15/80% pitch.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        actionName: z
+          .string()
+          .optional()
+          .describe("Action to write keyframes into (default 'AimOffset', created if missing)."),
+        spineBoneName: z.string().describe("Spine bone (e.g. spine_02)."),
+        neckBoneName: z.string().describe("Neck bone (e.g. neck_01)."),
+        headBoneName: z.string().describe("Head bone (e.g. head_01)."),
+        yawWeights: z
+          .array(z.number())
+          .length(3)
+          .optional()
+          .describe("Yaw share [spine, neck, head] — default [0.17, 0.22, 0.61]."),
+        pitchWeights: z
+          .array(z.number())
+          .length(3)
+          .optional()
+          .describe("Pitch share [spine, neck, head] — default [0.05, 0.15, 0.80]."),
+        yawDegMax: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Maximum yaw angle in degrees at corner poses (default 90)."),
+        pitchDegMax: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Maximum pitch angle in degrees at corner poses (default 45)."),
+        frameStart: z
+          .number()
+          .int()
+          .optional()
+          .describe("First frame (default 1; 9 poses written to frameStart..frameStart+8)."),
+      },
+      handler: passthroughPost("/aim_offset/bake_9_pose_matrix"),
+    },
+    {
       name: "keyframe_add",
       description: "Insert a keyframe at a frame for a data path.",
       inputSchema: {

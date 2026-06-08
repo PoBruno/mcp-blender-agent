@@ -99,5 +99,34 @@ export function registerObjectTools(server: McpServer): void {
       },
       handler: passthroughPost("/mesh/parent_to_armature"),
     },
+    {
+      name: "object_list",
+      description:
+        "List every object in bpy.data.objects with type, transform, parent, modifier count, collections, hide state. Optional type / name / collection filter. Pure read — use to discover what's in a loaded .blend before chaining mutations.",
+      inputSchema: {
+        typeFilter: z
+          .union([z.string(), z.array(z.string())])
+          .optional()
+          .describe("Object type(s) to keep (e.g. 'ARMATURE' or ['MESH','ARMATURE'])."),
+        namePattern: z
+          .string()
+          .optional()
+          .describe("Substring filter on object names (case-sensitive)."),
+        collectionName: z
+          .string()
+          .optional()
+          .describe("Only objects belonging to this collection."),
+      },
+      handler: passthroughPost("/object/list"),
+    },
+    {
+      name: "object_get_info",
+      description:
+        "Deep introspection of a single object — parent/children, modifiers, animation_data, plus type-specific summary (MESH: vert/uv/material/shape-key counts; ARMATURE: bone count, sockets; EMPTY: display type). Pure read.",
+      inputSchema: {
+        objectName: z.string().describe("Object name to inspect."),
+      },
+      handler: passthroughPost("/object/get_info"),
+    },
   ]);
 }
