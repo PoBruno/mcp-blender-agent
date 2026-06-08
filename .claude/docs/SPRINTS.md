@@ -143,6 +143,14 @@ All structural work for Sprints 0–5 landed in a single push. Per-tool tests fo
 
 **Sprint 4** — light + world + camera + render (engine/resolution/still/animation), library link/override/reload, asset mark/clear, full export remainder (gltf, fbx_skeletal, fbx_animation), import_fbx/obj/gltf. Integration test: `render.test.ts`.
 
-**Sprint 5 (partial)** — `exec_python` env-flagged with `EXEC_PYTHON_DISABLED` default, install harness (`install/INSTALL.md`, `install/AGENT-INSTALL.md`, `install/PROMPT-TEMPLATES.md`), recipe tests landed: `recipe-03-metahuman-face.test.ts`, `recipe-04-level-modular-kit.test.ts`, `recipe-08-animation-bake-export.test.ts`. Recipes 1, 2, 5, 6, 7 remain.
+**Sprint 5 (partial)** — `exec_python` env-flagged with `EXEC_PYTHON_DISABLED` default, install harness (`install/INSTALL.md`, `install/AGENT-INSTALL.md`, `install/PROMPT-TEMPLATES.md`), recipe tests landed: `recipe-03-metahuman-face.test.ts`, `recipe-04-level-modular-kit.test.ts`, `recipe-08-animation-bake-export.test.ts`. Recipes 1, 2, 5, 6, 7 remain (require future tools beyond the v1.0 set).
 
-**Build status:** `cd Tools && npm run build` exits 0. **Real-world validation: 39/39 tool tests + 3/3 recipe tests passing on Blender 5.1.2 (Steam install, port 9877 coexisting with ahujasid blender-mcp on 9876).** CI matrix (ubuntu/windows/macos) installs Blender 4.2 LTS for upstream parity.
+**Build status:** `cd Tools && npm run build` exits 0. **Real-world validation: 100% endpoint coverage on Blender 5.1.2 — 136/137 tool tests passing + 3/3 recipe tests passing (1 skipped: `bpy.data.libraries.load` is unreliable headless on Windows 5.x). All 131 registered HTTP endpoints are exercised by integration tests, including error-code paths.** Test files: 31 in `Tools/test/tools/`, 3 in `Tools/test/recipes/`. CI matrix (ubuntu/windows/macos) installs Blender 4.2 LTS for upstream parity.
+
+**Bugs found and fixed during runtime validation:**
+
+- `material/delete` accessed `mat.name` after `bpy.data.materials.remove(mat)` (ReferenceError on freed RNA). Captured name pre-removal.
+- `object/add_constraint` + `bone/add_constraint` raised `TypeError` (not `RuntimeError`) on unknown type — caught both.
+- `view_layer/list` used the non-existent `scene.view_layers.active`. Switched to `bpy.context.view_layer`.
+- `file/append_data` + `library/link` leaked `ValueError` from `bpy.data.libraries.load` (e.g. "Cannot load from current blend file") as `INTERNAL_ERROR`. Wrapped as `INVALID_INPUT`.
+- `compositor/add_node`, `shader_node/add`, `geo_node/add_node` raised `TypeError` (not `RuntimeError`) on unknown node type — caught both.
