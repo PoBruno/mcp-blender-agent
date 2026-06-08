@@ -499,18 +499,39 @@ async function main() {
       dst = D_LOC; prefix = "AS_Char_";
     }
 
-    const targetActionName = `${prefix.replace(/_$/, "")}_${clean}`;
-    const outPath = join(dst, `${targetActionName}.fbx`);
+    let targetActionName = `${prefix.replace(/_$/, "")}_${clean}`;
 
-    // Rename action if needed (preserves bone fcurves; FBX take = action.name)
+    // Rename action if needed (preserves bone fcurves; FBX take = action.name).
+    // If the target name is already taken by a different action (dedup kept
+    // both because they had different fcurve hashes), suffix _v2, _v3, ...
     if (x.originalName !== targetActionName) {
-      const ren = await step(`rename ${x.originalName} → ${targetActionName}`,
-        () => blenderPost("/action/rename", {
+      let attempt = targetActionName;
+      let suffix = 2;
+      while (true) {
+        const ren = await blenderPost("/action/rename", {
           actionName: x.originalName,
-          newName: targetActionName,
-        }));
-      if (!ren.ok) continue;
+          newName: attempt,
+        });
+        if (ren.ok) {
+          targetActionName = attempt;
+          await step(`rename ${x.originalName} → ${attempt}`, async () => ren);
+          break;
+        }
+        if (ren.errorCode !== "INVALID_INPUT" || !ren.message?.includes("would collide")) {
+          await step(`rename ${x.originalName} → ${attempt}`, async () => ren);
+          targetActionName = null;
+          break;
+        }
+        attempt = `${targetActionName}_v${suffix++}`;
+        if (suffix > 10) {
+          await step(`rename ${x.originalName} (gave up after _v9)`, async () => ren);
+          targetActionName = null;
+          break;
+        }
+      }
+      if (targetActionName === null) continue;
     }
+    const outPath = join(dst, `${targetActionName}.fbx`);
 
     // Assign + export
     await step(`export ${targetActionName} → ${basename(dst)}/`,
@@ -588,10 +609,10 @@ function finalize(_okOverall) {
   const REQUIRED = {
     locomotion: [
       { id: "Idle_neutral",  match: /Idle_?neutral|Idle\.fbx/i },
-      { id: "Walk_F",        match: /Walk_(?:forward(?!_diag)|F)\b/i },
-      { id: "Walk_B",        match: /Walk_backward(?!_diag)\b/i },
-      { id: "Walk_StrafeL",  match: /Walk_strafe_(?:left|l)\b/i },
-      { id: "Walk_StrafeR",  match: /Walk_strafe_(?:right|r)\b/i },
+      { id: "Walk_F",        match: /Walk_(?:forward(?!_diag)|F)(?:_|\b)/i },
+      { id: "Walk_B",        match: /Walk_backward(?!_diag)(?:_|\b)/i },
+      { id: "Walk_StrafeL",  match: /Walk_strafe_(?:left|l)(?:_|\b)/i },
+      { id: "Walk_StrafeR",  match: /Walk_strafe_(?:right|r)(?:_|\b)/i },
       { id: "Walk_DiagFL",   match: /Walk_forward_diagonal_(?:left|l)/i },
       { id: "Walk_DiagFR",   match: /Walk_forward_diagonal_(?:right|r)/i },
       { id: "Walk_DiagBL",   match: /Walk_backward_diagonal_(?:left|l)/i },
