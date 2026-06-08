@@ -25,6 +25,15 @@ export function registerAnimationTools(server: McpServer): void {
       handler: passthroughPost("/action/assign_to_object"),
     },
     {
+      name: "action_unassign_from_object",
+      description:
+        "Clear the active Action on an object so the rig evaluates at rest (bind pose). Idempotent — no-op when nothing is assigned. Use before rendering a clean bind-pose validation shot.",
+      inputSchema: {
+        objectName: z.string().describe("Owner object whose action will be cleared."),
+      },
+      handler: passthroughPost("/action/unassign_from_object"),
+    },
+    {
       name: "action_list",
       description:
         "List every Action in bpy.data.actions with frame range, fcurve count, slot count, fake-user flag. Pure read — handles both legacy and Blender 4.4+ layered actions.",

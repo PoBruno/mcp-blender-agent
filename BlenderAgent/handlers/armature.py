@@ -54,6 +54,34 @@ def armature_show_in_front(body: dict[str, Any]) -> dict[str, Any]:
             "refs": {"armatureName": arm.name}}
 
 
+@handler("POST", "/armature/set_pose_position")
+def armature_set_pose_position(body: dict[str, Any]) -> dict[str, Any]:
+    """Switch an armature between POSE (animations evaluated) and REST (bind pose).
+
+    REST ignores active action AND every NLA strip AND every pose-bone transform
+    — it's the only reliable way to render the imported bind pose after the
+    rig already has pushed strips. Restore with mode='POSE' after.
+
+    Body: { armatureObjectName: str, mode: 'POSE' | 'REST' }
+    """
+    arm = get_armature_object(body.get("armatureObjectName") or body.get("name"))
+    mode = (body.get("mode") or "POSE").upper()
+    if mode not in ("POSE", "REST"):
+        raise InvalidInputError(f"mode must be 'POSE' or 'REST', got {mode!r}")
+    prev = arm.data.pose_position
+    with composite_undo(f"armature_set_pose_position:{arm.name}/{mode}"):
+        arm.data.pose_position = mode
+    return {
+        "ok": True,
+        "data": {
+            "armatureObjectName": arm.name,
+            "mode": mode,
+            "previousMode": prev,
+        },
+        "refs": {"armatureName": arm.name},
+    }
+
+
 # UE5 SK_Mannequin convention IK bones. Sibling-of-root layout (NOT children of pelvis).
 # Heights/positions are in METERS at globalScale=1.0 (1 BU = 1 m). The artist
 # adjusts foot_l/foot_r/hand_l/hand_r references after the rig is in place.

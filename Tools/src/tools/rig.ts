@@ -32,6 +32,16 @@ export function registerArmatureTools(server: McpServer): void {
       handler: passthroughPost("/armature/show_in_front"),
     },
     {
+      name: "armature_set_pose_position",
+      description:
+        "Switch an armature between POSE (animations + NLA evaluated) and REST (bind pose, ignoring every action/strip/pose transform). Use REST before a bind-pose render after the rig has actions or NLA strips attached; restore POSE after.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        mode: z.enum(["POSE", "REST"]).describe("'POSE' = animations live, 'REST' = bind pose."),
+      },
+      handler: passthroughPost("/armature/set_pose_position"),
+    },
+    {
       name: "armature_add_ue5_ik_bones",
       description:
         "Add the 7 UE5 SK_Mannequin IK control bones (ik_foot_root, ik_foot_l/r, ik_hand_root, ik_hand_gun, ik_hand_l/r). Non-deforming by default. Sibling-of-root layout that UE5 auto-detects on import.",

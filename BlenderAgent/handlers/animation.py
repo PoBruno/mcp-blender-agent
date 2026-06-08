@@ -168,6 +168,47 @@ def _bone_name_from_data_path(dp: str) -> str:
     return dp[12:end]
 
 
+def _clear_action_fcurves(act: Any) -> int:
+    """Remove every fcurve from an action across legacy and layered APIs.
+
+    Returns the number of fcurves removed. Used by bake handlers that own an
+    action entirely and must guarantee no stale keyframes from a previous run.
+    """
+    removed = 0
+    fc = getattr(act, "fcurves", None)
+    if fc is not None:
+        try:
+            for cu in list(fc):
+                fc.remove(cu)
+                removed += 1
+            return removed
+        except TypeError:
+            pass
+
+    layers = getattr(act, "layers", None)
+    slots = getattr(act, "slots", None)
+    if layers is None or slots is None:
+        return removed
+    for layer in layers:
+        for strip in getattr(layer, "strips", []):
+            for slot in slots:
+                cb = None
+                if hasattr(strip, "channelbag"):
+                    try:
+                        cb = strip.channelbag(slot)
+                    except (RuntimeError, TypeError):
+                        cb = None
+                if cb is None or not hasattr(cb, "fcurves"):
+                    continue
+                try:
+                    for cu in list(cb.fcurves):
+                        cb.fcurves.remove(cu)
+                        removed += 1
+                except TypeError:
+                    pass
+    return removed
+
+
 @handler("POST", "/action/inspect")
 def action_inspect(body: dict[str, Any]) -> dict[str, Any]:
     """Deep-inspect an action: fcurve categories, touched bones, and a content
@@ -296,6 +337,30 @@ def action_assign_to_object(body: dict[str, Any]) -> dict[str, Any]:
         "ok": True,
         "data": {"objectName": obj.name, "actionName": act.name},
         "refs": {"objectName": obj.name, "actionName": act.name},
+    }
+
+
+@handler("POST", "/action/unassign_from_object")
+def action_unassign_from_object(body: dict[str, Any]) -> dict[str, Any]:
+    """Clear the active action on an object. Used before bind-pose render so the
+    armature evaluates at rest, not at whatever frame the last action drives.
+
+    Idempotent: returns ok with `wasAssigned=false` when nothing was assigned.
+    """
+    obj = get_object(body.get("objectName"))
+    prev = None
+    if obj.animation_data is not None and obj.animation_data.action is not None:
+        prev = obj.animation_data.action.name
+        with composite_undo(f"action_unassign_from_object:{obj.name}"):
+            obj.animation_data.action = None
+    return {
+        "ok": True,
+        "data": {
+            "objectName": obj.name,
+            "wasAssigned": prev is not None,
+            "previousActionName": prev or "",
+        },
+        "refs": {"objectName": obj.name},
     }
 
 
@@ -451,6 +516,10 @@ def aim_offset_bake_9_pose_matrix(body: dict[str, Any]) -> dict[str, Any]:
         # Ensure action exists and is assigned
         if action_name in bpy.data.actions:
             act = bpy.data.actions[action_name]
+            # Clear any stale fcurves so re-baking after a config change doesn't
+            # leave old bone keyframes alongside the new ones. We clear EVERY
+            # fcurve in the action — this handler owns the action entirely.
+            _clear_action_fcurves(act)
         else:
             act = bpy.data.actions.new(name=action_name)
         if arm.animation_data is None:
