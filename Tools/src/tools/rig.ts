@@ -78,6 +78,31 @@ export function registerArmatureTools(server: McpServer): void {
       },
       handler: passthroughPost("/armature/validate_ue5_convention"),
     },
+    {
+      name: "armature_rename_to_ue5_convention",
+      description:
+        "Batch-rename every bone in an armature to UE5 conventions: .L/.R → _l/_r (also .L_end → _l_end) and lowercase. SOCKET_* and ik_* bones are skipped. Two-pass rename avoids transient collisions. Vertex groups auto-update. Wrap in dryRun=true first to preview the plan and detect name collisions.",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        lowercase: z
+          .boolean()
+          .optional()
+          .describe("Lowercase every bone name (default true)."),
+        suffixLR: z
+          .boolean()
+          .optional()
+          .describe("Rewrite .L/.R suffix to _l/_r (default true)."),
+        dryRun: z
+          .boolean()
+          .optional()
+          .describe("If true, return the plan and exit without mutating."),
+        exclude: z
+          .array(z.string())
+          .optional()
+          .describe("Bone names to leave untouched."),
+      },
+      handler: passthroughPost("/armature/rename_to_ue5_convention"),
+    },
   ]);
 }
 

@@ -219,3 +219,132 @@ def armature_validate_ue5_convention(body: dict[str, Any]) -> dict[str, Any]:
     if not ok:
         payload["errorCode"] = "VALIDATION_FAILED"
     return payload
+
+
+_UE5_LR_SUFFIX_RE = re.compile(r"\.([LR])(_end)?$")
+
+
+def _to_ue5_name(name: str, *, lowercase: bool, suffix_lr: bool) -> str:
+    """Apply ARTIS UE5 naming rules to a single bone name.
+
+    - .L  → _l       .R  → _r
+    - .L_end → _l_end       .R_end → _r_end
+    - then optional lowercase pass.
+    Bones starting with 'SOCKET_' or 'ik_' are returned unchanged (already
+    canonical) — the SOCKET_ prefix is intentionally uppercase per UE5 import
+    detection, and ik_* bones we created are already lowercase.
+    """
+    if name.startswith("SOCKET_") or name.startswith("ik_"):
+        return name
+    out = name
+    if suffix_lr:
+        out = _UE5_LR_SUFFIX_RE.sub(
+            lambda m: ("_" + m.group(1).lower()) + (m.group(2) or ""),
+            out,
+        )
+    if lowercase:
+        out = out.lower()
+    return out
+
+
+@handler("POST", "/armature/rename_to_ue5_convention")
+def armature_rename_to_ue5_convention(body: dict[str, Any]) -> dict[str, Any]:
+    """Rename every bone in an armature to match UE5 naming conventions.
+
+    Body: {
+      armatureObjectName: str,
+      lowercase?: bool (default true),       # Bone.015 → bone.015
+      suffixLR?: bool (default true),        # .L/.R → _l/_r, .L_end → _l_end
+      dryRun?: bool (default false),         # if true, only report what would change
+      exclude?: [str, ...] (optional)        # bones to leave untouched
+    }
+
+    Vertex groups bound to renamed bones are auto-updated by Blender. Bones
+    prefixed with 'SOCKET_' or 'ik_' are skipped (already canonical).
+
+    The whole batch runs inside a single Edit-Mode session + one undo step,
+    so re-running is safe and Ctrl+Z reverts the entire batch.
+    """
+    arm = get_armature_object(body.get("armatureObjectName"))
+    lowercase = bool(body.get("lowercase", True))
+    suffix_lr = bool(body.get("suffixLR", True))
+    dry_run = bool(body.get("dryRun", False))
+    exclude = set(body.get("exclude") or [])
+
+    if not (lowercase or suffix_lr):
+        raise InvalidInputError("at least one of lowercase or suffixLR must be true")
+
+    # Plan first (no mutation) to detect collisions before we touch anything
+    set_active_and_selected(arm)
+    plan: list[tuple[str, str]] = []
+    collisions: list[dict[str, Any]] = []
+    with with_mode(arm, "EDIT"):
+        eb = arm.data.edit_bones
+        existing_names = {b.name for b in eb}
+        new_names: dict[str, str] = {}
+        for b in eb:
+            if b.name in exclude:
+                continue
+            target = _to_ue5_name(b.name, lowercase=lowercase, suffix_lr=suffix_lr)
+            if target == b.name:
+                continue
+            if target in existing_names and target != b.name:
+                collisions.append({"from": b.name, "to": target,
+                                   "reason": "target name already exists in armature"})
+                continue
+            if target in new_names.values():
+                collisions.append({"from": b.name, "to": target,
+                                   "reason": "target name collides with another planned rename"})
+                continue
+            new_names[b.name] = target
+            plan.append((b.name, target))
+
+        if dry_run or collisions:
+            return {
+                "ok": len(collisions) == 0,
+                "data": {
+                    "armatureObjectName": arm.name,
+                    "dryRun": dry_run,
+                    "planCount": len(plan),
+                    "plan": [{"from": o, "to": n} for o, n in plan],
+                    "collisionCount": len(collisions),
+                    "collisions": collisions,
+                },
+                "refs": {"armatureName": arm.name},
+                "errorCode": "NAME_COLLISION" if collisions else None,
+            }
+
+    # Apply for real — wrapped in undo
+    renamed: list[dict[str, str]] = []
+    with composite_undo(f"armature_rename_to_ue5:{arm.name}/{len(plan)}"):
+        set_active_and_selected(arm)
+        with with_mode(arm, "EDIT"):
+            eb = arm.data.edit_bones
+            # Two-pass rename to dodge transient collisions (a→b while b→c):
+            #   pass 1: rename all to a tmp name with a $ prefix
+            #   pass 2: rename tmp → final
+            tmp_map: dict[str, str] = {}
+            for old, new in plan:
+                if old not in eb:
+                    continue
+                tmp = f"${old}#tmp"
+                eb[old].name = tmp
+                tmp_map[tmp] = new
+            for tmp, final in tmp_map.items():
+                if tmp not in eb:
+                    continue
+                eb[tmp].name = final
+                actual = eb[final].name  # Blender may suffix .001 on collision
+                renamed.append({"from": tmp.removeprefix("$").removesuffix("#tmp"),
+                                "to": actual})
+
+    return {
+        "ok": True,
+        "data": {
+            "armatureObjectName": arm.name,
+            "renamedCount": len(renamed),
+            "renames": renamed,
+        },
+        "refs": {"armatureName": arm.name},
+    }
+
