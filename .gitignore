@@ -56,3 +56,6 @@ outputs/
 .env
 .env.local
 .artis-run/
+
+# Demo / scratch output
+scripts/_out/
