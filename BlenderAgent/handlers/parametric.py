@@ -28,6 +28,7 @@ _BUILDERS: Dict[str, str] = {
     "chair_beach":   "BlenderAgent.library.furniture.chair_beach",
     "table_dining":  "BlenderAgent.library.furniture.table_dining",
     "stool_bar":     "BlenderAgent.library.furniture.stool_bar",
+    "human_basic":   "BlenderAgent.library.character.human_basic",
 }
 
 

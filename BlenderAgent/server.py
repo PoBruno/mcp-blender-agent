@@ -442,6 +442,10 @@ def _server_reload(_body: dict[str, Any]) -> dict[str, Any]:
     pkg_name = "BlenderAgent.handlers"
     target_names = [n for n in list(_sys.modules.keys())
                     if n == pkg_name or n.startswith(pkg_name + ".")]
+    # Also reload the library subpackages so parametric builders pick up edits.
+    lib_pkg = "BlenderAgent.library"
+    target_names.extend(n for n in list(_sys.modules.keys())
+                        if n == lib_pkg or n.startswith(lib_pkg + "."))
     # Deterministic order: package first, then submodules alphabetically
     target_names.sort(key=lambda n: (0 if n == pkg_name else 1, n))
 
