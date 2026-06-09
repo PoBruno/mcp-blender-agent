@@ -1,25 +1,47 @@
 {
   "name": "@pobruno/blender-agent",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "MCP server giving AI agents complete deterministic control of Blender 4.2 LTS+ (modeling, rigging, animation, materials, shader/geometry nodes, rendering, granular import/export).",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "blender",
+    "bpy",
+    "ai-agent",
+    "claude",
+    "copilot",
+    "cursor",
+    "3d",
+    "rigging",
+    "animation",
+    "fbx",
+    "gltf",
+    "ue5"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "blender-agent": "dist/index.js"
+    "blender-agent": "bin/cli.mjs",
+    "blender-agent-mcp": "bin/cli.mjs"
   },
   "files": [
     "dist/",
+    "bin/",
+    "assets/BlenderAgent.zip",
+    "skill/",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "tsc",
+    "build:addon-zip": "node scripts/build-addon-zip.mjs",
+    "prepack": "npm run build && npm run build:addon-zip",
     "watch": "tsc --watch",
     "test": "vitest run",
     "test:unit": "vitest run --dir test/unit",
     "test:tools": "vitest run --dir test/tools",
     "test:recipes": "vitest run --dir test/recipes",
-    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true}); require('fs').rmSync('assets',{recursive:true,force:true})\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
@@ -34,8 +56,17 @@
     "node": ">=18.0.0"
   },
   "license": "MIT",
+  "homepage": "https://github.com/PoBruno/mcp-blender-agent#readme",
+  "bugs": {
+    "url": "https://github.com/PoBruno/mcp-blender-agent/issues"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/PoBruno/mcp-blender-agent"
+    "url": "git+https://github.com/PoBruno/mcp-blender-agent.git",
+    "directory": "Tools"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

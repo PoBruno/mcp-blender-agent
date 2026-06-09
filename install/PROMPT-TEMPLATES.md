@@ -11,52 +11,53 @@ Open your project in your IDE, then paste the matching prompt into your agent. T
 ### Claude Code
 
 ```
-Install https://github.com/PoBruno/mcp-blender-agent into this workspace.
-Follow install/AGENT-INSTALL.md from that repo end to end. Clone into
-.mcp/blender-agent, build the TS server, package the addon zip, merge MCP
-config into .mcp.json, inject the passive context skill into
-.claude/skills/blender-agent/ and reference it via a delimited managed block
-in CLAUDE.md. Use AskUserQuestion before anything destructive. Tell me the
-exact path to BlenderAgent.zip so I can install it in Blender's Add-ons UI.
+Install @pobruno/blender-agent into this workspace. Read install/AGENT-INSTALL.md
+from https://github.com/PoBruno/mcp-blender-agent and run every phase. Merge
+{ "command": "npx", "args": ["-y", "@pobruno/blender-agent@latest"] } into
+.mcp.json, then run `npx -y @pobruno/blender-agent --print-skill-dir` and copy
+the bundled SKILL/FLOWS/TOOLS markdown into .claude/skills/blender-agent/.
+Inject the managed block from MANAGED-BLOCK.md into CLAUDE.md. Use
+AskUserQuestion before anything destructive. Print the path from
+`--print-addon-zip` so I can install it in Blender's Add-ons UI.
 ```
 
 ### GitHub Copilot
 
 ```
-Install https://github.com/PoBruno/mcp-blender-agent into this workspace.
-Read install/AGENT-INSTALL.md from that repo and run every phase. Clone into
-.mcp/blender-agent, build the TS server, package the addon zip, write the
-MCP config to .vscode/mcp.json, inject the passive context skill into
-.github/instructions/blender-agent/ and reference it via a delimited managed
-block in .github/copilot-instructions.md. Use AskUserQuestion before anything
-destructive. Tell me the exact path to BlenderAgent.zip so I can install it
-in Blender's Add-ons UI.
+Install @pobruno/blender-agent into this workspace. Read install/AGENT-INSTALL.md
+from https://github.com/PoBruno/mcp-blender-agent and run every phase. Merge
+{ "command": "npx", "args": ["-y", "@pobruno/blender-agent@latest"] } into
+.vscode/mcp.json, then run `npx -y @pobruno/blender-agent --print-skill-dir`
+and copy the bundled instructions.md to .github/instructions/blender-agent.instructions.md
+plus FLOWS/TOOLS to .github/instructions/blender-agent/. Inject the managed
+block from MANAGED-BLOCK.md into .github/copilot-instructions.md. Use
+AskUserQuestion before anything destructive. Print the path from
+`--print-addon-zip` so I can install it in Blender's Add-ons UI.
 ```
 
 ### Cursor
 
 ```
-Install https://github.com/PoBruno/mcp-blender-agent into this workspace.
-Follow install/AGENT-INSTALL.md from that repo end to end. Clone into
-.mcp/blender-agent, build the TS server, package the addon zip, merge MCP
-config into .mcp.json, inject the passive context skill into ./blender-agent/
-and reference it via a delimited managed block in AGENTS.md. Ask before
-anything destructive. Tell me the exact path to BlenderAgent.zip so I can
-install it in Blender's Add-ons UI.
+Install @pobruno/blender-agent into this workspace. Read install/AGENT-INSTALL.md
+from https://github.com/PoBruno/mcp-blender-agent and run every phase. Merge
+{ "command": "npx", "args": ["-y", "@pobruno/blender-agent@latest"] } into
+.mcp.json, then run `npx -y @pobruno/blender-agent --print-skill-dir` and copy
+the bundled SKILL/FLOWS/TOOLS markdown into ./blender-agent/. Inject the
+managed block from MANAGED-BLOCK.md into AGENTS.md. Ask before anything
+destructive. Print the path from `--print-addon-zip` so I can install it in
+Blender's Add-ons UI.
 ```
 
 ### Claude Desktop
 
 ```
-Install https://github.com/PoBruno/mcp-blender-agent into the folder I'll
-tell you. Follow install/AGENT-INSTALL.md from that repo end to end. Clone
-into <FOLDER>/.mcp/blender-agent, build the TS server, package the addon zip,
-add the MCP entry to %APPDATA%\Claude\claude_desktop_config.json with
-absolute paths, inject the passive context skill, and tell me when I need to
-restart Claude Desktop. Ask before anything destructive. Tell me the exact
-path to BlenderAgent.zip so I can install it in Blender's Add-ons UI.
-
-Workspace folder: <PASTE ABSOLUTE PATH HERE>
+Install @pobruno/blender-agent for me. Read install/AGENT-INSTALL.md from
+https://github.com/PoBruno/mcp-blender-agent and run every phase. Merge
+{ "command": "npx", "args": ["-y", "@pobruno/blender-agent@latest"] } into
+%APPDATA%\Claude\claude_desktop_config.json. Tell me when I need to restart
+Claude Desktop. Ask before anything destructive. Print the path from
+`npx -y @pobruno/blender-agent --print-addon-zip` so I can install it in
+Blender's Add-ons UI.
 ```
 
 ---
@@ -66,12 +67,12 @@ Workspace folder: <PASTE ABSOLUTE PATH HERE>
 Same prompt for every harness — the installer keeps a delimited managed block so removal is precise.
 
 ```
-Uninstall the blender-agent MCP from this workspace. Follow Phase 7 of
-install/AGENT-INSTALL.md inside .mcp/blender-agent: remove the managed block
-from my primary instruction file, delete the skill files, remove the
-blender-agent key from my MCP config (preserve every other entry), and ask
-me before deleting the clone itself. Tell me how to remove the Blender addon
-manually since you can't reach into Blender.
+Uninstall @pobruno/blender-agent from this workspace. Follow Phase 7 of
+install/AGENT-INSTALL.md from https://github.com/PoBruno/mcp-blender-agent:
+remove the managed block from my primary instruction file, delete the skill
+files, and remove the `blender-agent` key from my MCP config (preserve every
+other entry). Ask before clearing the npx cache. Tell me how to remove the
+Blender addon manually since you can't reach into Blender.
 ```
 
 ---

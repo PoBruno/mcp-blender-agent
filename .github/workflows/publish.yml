@@ -1,0 +1,170 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v0.1.0). Must already exist on main."
+        required: true
+        type: string
+
+permissions:
+  contents: write   # for the GitHub Release upload
+  id-token: write   # for npm provenance via OIDC
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: Validate tag is on main
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Resolve tag
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
+            echo "Tag '$TAG' is not a semver tag (vMAJOR.MINOR.PATCH[-prerelease])." >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Confirm tag points at a commit reachable from main
+        run: |
+          git fetch origin main --depth=1
+          if ! git merge-base --is-ancestor "${{ steps.resolve.outputs.tag }}" origin/main; then
+            echo "Tag ${{ steps.resolve.outputs.tag }} is not on the main branch." >&2
+            exit 1
+          fi
+
+      - name: Confirm Tools/package.json version matches the tag
+        run: |
+          PKG_VERSION=$(node -p "require('./Tools/package.json').version")
+          if [ "$PKG_VERSION" != "${{ steps.resolve.outputs.version }}" ]; then
+            echo "Tools/package.json version ($PKG_VERSION) does not match tag (${{ steps.resolve.outputs.version }})." >&2
+            exit 1
+          fi
+
+  build-test:
+    name: Build + test
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.guard.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install deps
+        working-directory: Tools
+        run: npm ci
+
+      - name: Type-check + build
+        working-directory: Tools
+        run: npm run build
+
+      - name: Build addon zip + copy LICENSE
+        working-directory: Tools
+        run: npm run build:addon-zip
+
+      - name: Upload prepack assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: prepack-${{ needs.guard.outputs.version }}
+          path: |
+            Tools/dist/
+            Tools/bin/
+            Tools/assets/BlenderAgent.zip
+            Tools/LICENSE
+            Tools/package.json
+            Tools/README.md
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-npm:
+    name: Publish to npm
+    needs: [guard, build-test]
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@pobruno/blender-agent
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.guard.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install deps
+        working-directory: Tools
+        run: npm ci
+
+      - name: Publish (prepack runs build + addon zip + LICENSE copy)
+        working-directory: Tools
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [guard, build-test, publish-npm]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.guard.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build addon zip
+        working-directory: Tools
+        run: |
+          npm ci
+          npm run build:addon-zip
+
+      - name: Rename zip with version
+        run: |
+          mkdir -p release-assets
+          cp Tools/assets/BlenderAgent.zip "release-assets/BlenderAgent-${{ needs.guard.outputs.version }}.zip"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.guard.outputs.tag }}
+          name: ${{ needs.guard.outputs.tag }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            release-assets/BlenderAgent-${{ needs.guard.outputs.version }}.zip
+          body: |
+            **Install in one prompt:** see [README](https://github.com/PoBruno/mcp-blender-agent#-install-in-one-prompt) or [install/AGENT-INSTALL.md](https://github.com/PoBruno/mcp-blender-agent/blob/main/install/AGENT-INSTALL.md).
+
+            **npm:** `npx -y @pobruno/blender-agent@${{ needs.guard.outputs.version }}` (the addon zip is bundled inside — `npx @pobruno/blender-agent --print-addon-zip` prints its path).
+
+            **Blender addon (manual install):** the attached `BlenderAgent-${{ needs.guard.outputs.version }}.zip` is the same file bundled in the npm package. Install via Blender → Edit → Preferences → Add-ons → Install...

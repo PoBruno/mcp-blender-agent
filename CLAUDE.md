@@ -225,14 +225,14 @@ Headless Blender requirement: `blender` on `PATH` or `BLENDER_BIN` env var point
 
 ## Claude Code config (after install)
 
-The install harness clones the repo into `<workspace>/.mcp/blender-agent/` and writes:
+The MCP server runs straight from npm via `npx`. The install harness writes this into `<workspace>/.mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "blender-agent": {
-      "command": "node",
-      "args": [".mcp/blender-agent/Tools/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@pobruno/blender-agent@latest"],
       "env": { "BLENDER_PORT": "9877" }
     }
   }
@@ -247,15 +247,17 @@ Written to `.vscode/mcp.json`:
 {
   "servers": {
     "blender-agent": {
-      "command": "node",
-      "args": [".mcp/blender-agent/Tools/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@pobruno/blender-agent@latest"],
       "env": { "BLENDER_PORT": "9877" }
     }
   }
 }
 ```
 
-See [install/AGENT-INSTALL.md](install/AGENT-INSTALL.md) for the full clone-and-zip install flow.
+The npm package bundles the Blender addon zip and the passive context skill. Resolve them with `npx -y @pobruno/blender-agent@latest --print-addon-zip` and `--print-skill-dir`. See [install/AGENT-INSTALL.md](install/AGENT-INSTALL.md) for the full npx-first install flow.
+
+Releases: tag `v*.*.*` on `main` triggers [.github/workflows/publish.yml](.github/workflows/publish.yml) which publishes `@pobruno/blender-agent` to npm (with provenance) and attaches `BlenderAgent-<version>.zip` to a GitHub Release. Requires the `NPM_TOKEN` automation token in repo secrets.
 
 ---
 

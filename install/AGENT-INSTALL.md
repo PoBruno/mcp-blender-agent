@@ -1,10 +1,10 @@
 # AGENT-INSTALL.md — the brain
 
-You are an AI coding agent (Claude Code, GitHub Copilot agent mode, Cursor, anything that speaks MCP + has shell + filesystem tools). The user asked you to install `mcp-blender-agent` into the workspace they have open. **You are the installer.** Follow this playbook end to end. Don't skip phases.
+You are an AI coding agent (Claude Code, GitHub Copilot agent mode, Cursor, anything that speaks MCP + has shell + filesystem tools). The user asked you to install `@pobruno/blender-agent` into the workspace they have open. **You are the installer.** Follow this playbook end to end. Don't skip phases.
 
 This file is the single source of truth for the install. For a human-only manual reference, see [`INSTALL.md`](INSTALL.md). For copy-paste entry prompts, see [`PROMPT-TEMPLATES.md`](PROMPT-TEMPLATES.md). For what gets injected into the user's harness, see [`context-skill/`](context-skill/).
 
-Repo: https://github.com/PoBruno/mcp-blender-agent.
+Repo: https://github.com/PoBruno/mcp-blender-agent. npm: https://www.npmjs.com/package/@pobruno/blender-agent.
 
 ---
 
@@ -12,11 +12,11 @@ Repo: https://github.com/PoBruno/mcp-blender-agent.
 
 0. **CONFIRM SCOPE** — describe what you're about to do and wait for "go".
 1. **DETECT** — read-only sweep of the workspace, the user's harness, conflicting MCP servers, the local Blender install, and existing instruction files.
-2. **PLAN** — adaptive placement of the clone, the skill, the MCP config; conflict proposal.
+2. **PLAN** — adaptive placement of the MCP config, the skill files, and the managed block; conflict proposal.
 3. **ASK** — surface picture + plan in one structured batch via `AskUserQuestion` (or harness equivalent). Skip any question with only one reasonable answer.
-4. **EXECUTE** — clone repo into the workspace, build the TS server, package the addon zip, merge MCP config.
-5. **INJECT** — install the passive context skill into the user's harness and add the delimited managed block to their primary instruction file.
-6. **VERIFY** — restart prompt, addon install instructions, health check (`server_status`), sample prompt.
+4. **EXECUTE** — merge the MCP config so the agent runtime spawns `npx -y @pobruno/blender-agent`. Pull the bundled paths (`--print-addon-zip`, `--print-skill-dir`).
+5. **INJECT** — copy the passive context skill from the npm bundle into the user's harness and add the delimited managed block to their primary instruction file.
+6. **VERIFY** — manual Blender addon install (~30s, the one step you can't automate), agent restart, `server_status` health check, sample prompts.
 7. **UNINSTALL / REPAIR** — documented reverse path. Same delimiters → clean removal.
 
 Each phase has gates. **Stop at a gate** if information is missing or anything looked unexpected. Don't improvise.
@@ -27,18 +27,18 @@ Each phase has gates. **Stop at a gate** if information is missing or anything l
 
 Say (adapt to the harness, English or pt-BR depending on the user):
 
-> I'll install `mcp-blender-agent` into the workspace you have open. I'll do this in 6 phases:
+> I'll install the `@pobruno/blender-agent` MCP into the workspace you have open. The MCP server itself runs via `npx` — no clone, no build. I'll do this in 6 phases:
 >
 > 1. **Detect** what you already have (workspace, agent harness, MCP servers, Blender install, instructions) — read-only.
 > 2. **Plan** the install adaptively based on what I find.
 > 3. **Ask** you to confirm any decisions that aren't obvious.
-> 4. **Execute** — clone the repo into `.mcp/blender-agent/`, build the TypeScript server, package the addon as a zip.
+> 4. **Execute** — add `blender-agent` to your MCP config so your agent spawns `npx -y @pobruno/blender-agent` on demand.
 > 5. **Inject** the passive Blender context skill into your harness so your agent has Blender know-how in every interaction.
 > 6. **Verify** with a health check and sample prompts.
 >
-> One manual step: you install the addon zip in Blender's Add-ons preferences yourself — I can't reach into a separate Blender process to enable a plugin.
+> One manual step: I'll print the absolute path of the bundled `BlenderAgent.zip` and you install it via Blender's Add-ons UI — I can't reach into a separate Blender process to enable a plugin.
 >
-> Total time: 2–5 minutes plus the Blender addon install (~30s). Proceed?
+> Total time: 1–2 minutes plus the Blender addon install (~30s). Proceed?
 
 Wait for confirmation.
 
@@ -50,16 +50,14 @@ Do all of this without modifying anything. Collect a JSON-shaped picture you'll 
 
 ### 1.1 — Workspace root
 
-The clone lives **inside the workspace the user has open** (matches `mcp-unreal-agent`'s pattern). Resolve the workspace root from your harness:
+The MCP config is workspace-local. Resolve the workspace root from your harness:
 
 - VS Code / Copilot: the open folder (`${workspaceFolder}`).
 - Claude Code: the directory `claude` was launched in (CWD of the agent process).
 - Cursor: same as VS Code.
-- Claude Desktop: no workspace concept — ask the user for an absolute path to a folder where the clone should live.
+- Claude Desktop: no workspace concept — the install touches a **global** config file (`%APPDATA%\Claude\claude_desktop_config.json` on Windows, `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS). Always ask before writing there.
 
-If you cannot resolve a workspace, **stop and ask** for an absolute path.
-
-Note whether `.mcp/blender-agent/` already exists at the workspace root (re-install path).
+If you cannot resolve a workspace and the user isn't on Claude Desktop, **stop and ask**.
 
 ### 1.2 — Harness type
 
@@ -76,7 +74,7 @@ A workspace may have several. **Record all that are present** — the user might
 
 ### 1.3 — Existing MCP servers
 
-Read every MCP config file found in 1.2 and list each registered server. Flag any whose `command` / `args` look Blender-related (substring match on `blender`, `blender-mcp`, `bpy`) or any binding port `9877`. These are **candidates to centralize** in Phase 3.
+Read every MCP config file found in 1.2 and list each registered server. Flag any whose `command` / `args` look Blender-related (substring match on `blender`, `blender-mcp`, `bpy`, `pobruno/blender-agent`) or any binding port `9877`. These are **candidates to centralize** in Phase 3.
 
 The popular `ahujasid/blender-mcp` on port **9876** is NOT a conflict — we deliberately use 9877 to coexist. Leave it alone.
 
@@ -113,34 +111,21 @@ Linux / macOS equivalents: `which blender`, `/Applications/Blender.app/Contents/
 
 Require **Blender 4.2 LTS or newer (5.x recommended)**. If older or missing, surface it — don't try to install Blender for the user.
 
-### 1.6 — Blender addons directory
-
-Record the path where the user's Blender looks for addons. The standard locations:
-
-| OS | Path |
-|---|---|
-| Windows | `%APPDATA%\Blender Foundation\Blender\<version>\scripts\addons\` |
-| macOS | `~/Library/Application Support/Blender/<version>/scripts/addons/` |
-| Linux | `~/.config/blender/<version>/scripts/addons/` |
-
-`<version>` matches the Blender major.minor (e.g. `5.1`, `4.2`). This is informational for Phase 6 — the user installs the zip via the GUI; you don't write into this folder.
-
-### 1.7 — Prereqs
+### 1.6 — Prereqs
 
 ```powershell
-node --version       # need 18+
-git --version
+node --version       # need 18+ (npx ships with npm)
 ```
 
 If Node is missing or < 18, surface and stop — don't try to install Node for the user.
 
-### 1.8 — Build the picture
+### 1.7 — Build the picture
 
 End of Phase 1, you should have something like:
 
 ```json
 {
-  "workspace": { "root": "C:/Users/me/my-project", "cloneAlreadyExists": false },
+  "workspace": { "root": "C:/Users/me/my-project" },
   "harness": ["claude-code", "copilot"],
   "mcpConfigs": {
     "claude": { "path": ".mcp.json", "servers": ["my-other-mcp"] },
@@ -151,8 +136,8 @@ End of Phase 1, you should have something like:
     "claude": ["CLAUDE.md", ".claude/rules/python.md"],
     "copilot": [".github/copilot-instructions.md"]
   },
-  "blender": { "binary": "C:/Program Files/Blender Foundation/Blender 5.1/blender.exe", "version": "5.1.2", "addonsDir": "C:/Users/me/AppData/Roaming/Blender Foundation/Blender/5.1/scripts/addons" },
-  "prereqs": { "node": "20.10.0", "git": "2.43" }
+  "blender": { "binary": "C:/Program Files/Blender Foundation/Blender 5.1/blender.exe", "version": "5.1.2" },
+  "prereqs": { "node": "20.10.0" }
 }
 ```
 
@@ -168,9 +153,14 @@ Derive the proposal from the detected picture. Don't ask anything yet.
 
 If multiple harnesses were detected, default order: **Claude Code → Copilot → Cursor → Claude Desktop**. If only one, that's the primary. The user will confirm in Phase 3.
 
-### 2.2 — Decide clone location
+### 2.2 — Decide MCP config target
 
-Default: `<workspace>/.mcp/blender-agent/`. Hidden directory at the workspace root, consistent with `.vscode`, `.github`, `.claude`. The user can override in Phase 3 if they prefer a different location (e.g. `tools/blender-agent/` for visibility).
+- Claude Code → `.mcp.json` at workspace root (`mcpServers.blender-agent`).
+- Copilot → `.vscode/mcp.json` (`servers.blender-agent`).
+- Cursor → `.mcp.json` like Claude Code.
+- Claude Desktop → `%APPDATA%\Claude\claude_desktop_config.json` (Windows) / `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS). **Always ask** before touching this one (global).
+
+The command is **always** `npx -y @pobruno/blender-agent@latest` — no per-workspace clone, no build.
 
 ### 2.3 — Decide skill placement
 
@@ -182,27 +172,18 @@ Default: `<workspace>/.mcp/blender-agent/`. Hidden directory at the workspace ro
 
 If a primary instruction file doesn't exist, the plan **creates a minimal one** whose body is the managed block (so the skill is reachable). The user will confirm.
 
-### 2.4 — Decide MCP config target
-
-- Claude Code → `.mcp.json` at workspace root (`mcpServers.blender-agent`).
-- Copilot → `.vscode/mcp.json` (`servers.blender-agent`).
-- Cursor → `.mcp.json` like Claude Code.
-- Claude Desktop → `%APPDATA%\Claude\claude_desktop_config.json` (Windows) / `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) with **absolute paths**. **Always ask** before touching this one (global).
-
-### 2.5 — Conflict proposal
+### 2.4 — Conflict proposal
 
 For each conflict from 1.3, decide a default recommendation:
 
-- **Another `mcp-blender-agent` already configured** (different path) → recommend `replace with this install`.
+- **Another `@pobruno/blender-agent` already configured** (different version pin / different command) → recommend `replace with this install`.
 - **Port 9877 bound by another server** → recommend `disable that one OR change its port` (we can't move ours at runtime currently).
 - **`ahujasid/blender-mcp` on port 9876** → **not a conflict**, leave it alone. Document the coexistence.
 - **Unrelated MCP** (`tavily`, `github`, etc.) → recommend `keep both`.
 
-### 2.6 — Build / re-install step
+### 2.5 — Version pin
 
-- `cloneAlreadyExists == true` and `Tools/dist/index.js` exists → recommend `update via git pull + npm install + npm run build`.
-- Fresh → recommend `clone + build`.
-- For the addon, you ALWAYS produce a fresh zip from the cloned `BlenderAgent/` folder so the version matches what the TS server expects.
+Default: `@latest`. Lets npx fetch the newest published version on every cold start. If the user prefers reproducibility, suggest pinning to the current `latest` version (you'll fetch it in Phase 4 with `npm view @pobruno/blender-agent version`).
 
 End of Phase 2: you have a proposal you can show.
 
@@ -215,7 +196,7 @@ Surface the picture + proposal in one batch with `AskUserQuestion` (or your harn
 Recommended questions:
 
 1. **Confirm harness.** "I detected `<list>`. Which is your primary?" *(options: each detected + "all of them"; recommended = first in order)*
-2. **Clone location.** "I'll clone into `<workspace>/.mcp/blender-agent/`. OK?" *(options: `OK (recommended)`, `Use a different path — let me specify`)*
+2. **Version pin.** "I'll use `@pobruno/blender-agent@latest`. Or pin to `@<current-version>` for reproducibility?" *(options: `@latest (recommended)`, `Pin to current version`)*
 3. **Conflicting MCPs.** *(only if `conflicts.length > 0`)* "I found `<server-name>` in `<config-path>` — it overlaps with `blender-agent`. What do you want to do?" *(options: `Replace it (recommended)`, `Keep both — let me pick later`, `Remove that one`)*
 4. **Context skill placement.** "I'll install the passive Blender context skill at `<path>` and reference it from `<primary instruction file>` via a delimited managed block. OK?" *(options: `OK`, `Place skill elsewhere — let me specify`)*
 5. **Claude Desktop?** *(only if Claude Desktop is a candidate but not the primary in-workspace harness)* "I won't touch `%APPDATA%\Claude\claude_desktop_config.json` unless you say so. Want me to add the entry there too?" *(options: `No`, `Yes, with absolute paths`)*
@@ -228,68 +209,21 @@ For every "yes" option that involves a destructive action (replace a server, ove
 
 Each substep is idempotent. If something fails, **stop** and tell the user — don't try to "fix" the workspace.
 
-### 4.1 — Clone or update the repo
-
-```powershell
-$cloneDir = Join-Path $workspace.root ".mcp/blender-agent"
-New-Item -ItemType Directory -Force -Path (Split-Path $cloneDir) | Out-Null
-
-if (Test-Path $cloneDir) {
-    Push-Location $cloneDir
-    git pull --ff-only
-    Pop-Location
-} else {
-    git clone https://github.com/PoBruno/mcp-blender-agent.git $cloneDir
-}
-```
-
-If `git pull` fails because the user has local changes, surface and stop.
-
-### 4.2 — Build the TS server
-
-```powershell
-Push-Location (Join-Path $cloneDir "Tools")
-npm install
-npm run build
-Pop-Location
-```
-
-Verify `Tools/dist/index.js`. If `npm install` fails because Node is < 18, surface and stop — don't try to upgrade Node for the user.
-
-### 4.3 — Package the addon as a zip
-
-The addon is a single Python package at `<clone>/BlenderAgent/`. Zip it so the user can install via Blender's GUI in Phase 6.
-
-```powershell
-$addonSource = Join-Path $cloneDir "BlenderAgent"
-$addonZip    = Join-Path $cloneDir "BlenderAgent.zip"
-if (Test-Path $addonZip) { Remove-Item $addonZip }
-Compress-Archive -Path $addonSource -DestinationPath $addonZip
-```
-
-On macOS / Linux:
-
-```bash
-cd "$cloneDir" && zip -r BlenderAgent.zip BlenderAgent -x '*/__pycache__/*'
-```
-
-Verify the zip contains `BlenderAgent/__init__.py` at the top (Blender expects the addon folder, not its contents, at the root).
-
-### 4.4 — Disable / replace conflicting MCP servers (if approved in Phase 3)
+### 4.1 — Disable / replace conflicting MCP servers (if approved in Phase 3)
 
 For each `replace` decision, **remove the conflicting server's entry** from its MCP config file. Preserve every other entry. If the user said `Keep both`, leave them alone.
 
-### 4.5 — Merge our MCP config
+### 4.2 — Merge our MCP config
 
-Per primary harness (and any extra approved in Phase 3). Use **relative paths** for in-workspace harnesses, **absolute paths** for Claude Desktop.
+Per primary harness (and any extra approved in Phase 3). The command is `npx`, no install needed — the first invocation will fetch and cache the package automatically.
 
 **Claude Code — `.mcp.json` (workspace root)**
 ```json
 {
   "mcpServers": {
     "blender-agent": {
-      "command": "node",
-      "args": [".mcp/blender-agent/Tools/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@pobruno/blender-agent@latest"],
       "env": { "BLENDER_PORT": "9877" }
     }
   }
@@ -301,8 +235,8 @@ Per primary harness (and any extra approved in Phase 3). Use **relative paths** 
 {
   "servers": {
     "blender-agent": {
-      "command": "node",
-      "args": [".mcp/blender-agent/Tools/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@pobruno/blender-agent@latest"],
       "env": { "BLENDER_PORT": "9877" }
     }
   }
@@ -311,14 +245,14 @@ Per primary harness (and any extra approved in Phase 3). Use **relative paths** 
 
 **Cursor — same as Claude Code (`.mcp.json` at workspace root).**
 
-**Claude Desktop** — `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS). Use **absolute paths**:
+**Claude Desktop** — `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
 
 ```json
 {
   "mcpServers": {
     "blender-agent": {
-      "command": "node",
-      "args": ["C:/Users/me/my-project/.mcp/blender-agent/Tools/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@pobruno/blender-agent@latest"],
       "env": { "BLENDER_PORT": "9877" }
     }
   }
@@ -326,6 +260,28 @@ Per primary harness (and any extra approved in Phase 3). Use **relative paths** 
 ```
 
 Always **merge — never overwrite**. If `blender-agent` already exists, replace its entry only. Preserve every other server entry.
+
+On Windows, when an MCP harness can't find `npx` on PATH, fall back to the absolute path:
+
+```json
+{
+  "command": "C:\\Program Files\\nodejs\\npx.cmd",
+  "args": ["-y", "@pobruno/blender-agent@latest"]
+}
+```
+
+### 4.3 — Resolve bundled paths
+
+```powershell
+npx -y @pobruno/blender-agent@latest --print-skill-dir
+npx -y @pobruno/blender-agent@latest --print-addon-zip
+```
+
+The first prints the absolute path to a directory holding `SKILL.md`, `FLOWS.md`, `TOOLS.md`, `MANAGED-BLOCK.md`, `instructions.md`. Use those in Phase 5.
+
+The second prints the absolute path to `BlenderAgent.zip` — keep it for Phase 6.
+
+Both commands are idempotent and don't mutate anything beyond the npx cache.
 
 ---
 
@@ -335,20 +291,20 @@ This phase is the headline. It's why the user gets value in every subsequent int
 
 ### 5.1 — Copy the skill files
 
-From the clone's `install/context-skill/` directory **into the user's harness location** picked in Phase 2:
+From the `--print-skill-dir` output above (e.g. `C:\Users\me\AppData\Local\npm-cache\_npx\<hash>\node_modules\@pobruno\blender-agent\skill\`) into the user's harness:
 
 **Claude Code:**
-- `install/context-skill/SKILL.md` → `.claude/skills/blender-agent/SKILL.md`
-- `install/context-skill/FLOWS.md` → `.claude/skills/blender-agent/FLOWS.md`
-- `install/context-skill/TOOLS.md` → `.claude/skills/blender-agent/TOOLS.md`
+- `<skill-dir>/SKILL.md` → `.claude/skills/blender-agent/SKILL.md`
+- `<skill-dir>/FLOWS.md` → `.claude/skills/blender-agent/FLOWS.md`
+- `<skill-dir>/TOOLS.md` → `.claude/skills/blender-agent/TOOLS.md`
 
 **Copilot:**
-- `install/context-skill/instructions.md` → `.github/instructions/blender-agent.instructions.md`
-- `install/context-skill/FLOWS.md` → `.github/instructions/blender-agent/FLOWS.md`
-- `install/context-skill/TOOLS.md` → `.github/instructions/blender-agent/TOOLS.md`
+- `<skill-dir>/instructions.md` → `.github/instructions/blender-agent.instructions.md`
+- `<skill-dir>/FLOWS.md` → `.github/instructions/blender-agent/FLOWS.md`
+- `<skill-dir>/TOOLS.md` → `.github/instructions/blender-agent/TOOLS.md`
 
 **Cursor / generic:**
-- `install/context-skill/SKILL.md` + `FLOWS.md` + `TOOLS.md` → `blender-agent/` at workspace root
+- `<skill-dir>/SKILL.md`, `FLOWS.md`, `TOOLS.md` → `blender-agent/` at workspace root
 
 Files are copied **as-is**. Don't edit them — they're the canonical source.
 
@@ -359,7 +315,7 @@ Open the primary instruction file (`CLAUDE.md` / `.github/copilot-instructions.m
 - If a managed block already exists (look for the delimiters `<!-- BEGIN blender-agent` / `<!-- END blender-agent -->`), **replace the region between (and including) them** with the new block.
 - If no managed block exists, **append** the new block to the end of the file (with a leading blank line).
 
-Use the exact block from [`context-skill/MANAGED-BLOCK.md`](context-skill/MANAGED-BLOCK.md) for the user's primary harness. **Do not modify content outside the delimiters.**
+Use the exact block from `<skill-dir>/MANAGED-BLOCK.md` for the user's primary harness. **Do not modify content outside the delimiters.**
 
 If the primary instruction file doesn't exist, create a minimal one whose only content is the managed block (with a one-line preface like `# Project instructions`).
 
@@ -373,13 +329,13 @@ Re-read the file. Confirm both delimiters are present exactly once. If you see t
 
 ### 6.1 — Install the Blender addon (manual user step)
 
-Display these exact instructions, with the real absolute path to the zip:
+Display these exact instructions, with the real absolute path to the zip from Phase 4.3:
 
 > ⚠️ **Manual step (~30s).** I can't reach into Blender to enable an addon for you. Please:
 >
 > 1. Open Blender.
 > 2. **Edit → Preferences → Add-ons → Install...**
-> 3. Navigate to `<absolute path to BlenderAgent.zip>` and click **Install Add-on**.
+> 3. Navigate to `<absolute path from --print-addon-zip>` and click **Install Add-on**.
 > 4. In the add-on list, search **"BlenderAgent"** and tick the checkbox to enable it.
 > 5. Click the disclosure triangle on the add-on entry — the panel should say `HTTP server started on port 9877`.
 > 6. (Optional) **Edit → Preferences → Save Preferences** so it auto-loads next time.
@@ -399,7 +355,7 @@ Once the user confirms the addon is enabled, say:
 > - **Cursor:** **Developer: Reload Window**.
 > - **Claude Desktop:** quit and re-open the app.
 >
-> Tell me when it's restarted — I'll run the health check.
+> The first call will be slower while `npx` fetches `@pobruno/blender-agent` into the npx cache. Subsequent calls are instant. Tell me when it's restarted — I'll run the health check.
 
 Wait.
 
@@ -408,7 +364,7 @@ Wait.
 Once the user confirms the restart, call the `server_status` MCP tool. Expected:
 
 ```json
-{ "ok": true, "data": { "version": "5.1.2", "scene": "Scene", "mode": "blender-agent", "addonVersion": "0.0.1", "execPythonAllowed": false } }
+{ "ok": true, "data": { "version": "5.1.2", "scene": "Scene", "mode": "blender-agent", "addonVersion": "0.1.0", "execPythonAllowed": false } }
 ```
 
 If `ok == true` and `version` starts with `4.` or `5.` → install succeeded.
@@ -416,7 +372,7 @@ If `ok == true` and `version` starts with `4.` or `5.` → install succeeded.
 Diagnostics:
 
 - `BLENDER_UNREACHABLE` → addon not enabled or Blender not running. Re-check Phase 6.1.
-- Tool isn't available in the agent at all → the MCP config wasn't reloaded. Have them restart the agent / reload the window again.
+- Tool isn't available in the agent at all → the MCP config wasn't reloaded, OR npx failed to fetch the package. Try `npx -y @pobruno/blender-agent --version` in a terminal to confirm the package resolves.
 - Wrong Blender version returned → user enabled the addon in a different Blender install than what was detected in Phase 1.5. Ask which Blender they want to drive.
 
 ### 6.4 — Confirm the skill loaded
@@ -466,13 +422,14 @@ Remove-Item -Recurse -Force "$workspace/blender-agent" -ErrorAction SilentlyCont
 
 Open each MCP config the installer wrote and **remove only the `blender-agent` key**. Preserve everything else.
 
-### 7.4 — Remove the clone (ask first)
+### 7.4 — Clear the npx cache (optional)
 
 ```powershell
-Remove-Item -Recurse -Force "$workspace/.mcp/blender-agent"
+# Targeted — just our package
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\npm-cache\_npx\*\node_modules\@pobruno\blender-agent" -ErrorAction SilentlyContinue
 ```
 
-Ask before doing this — the user may have local edits. If `.mcp/` is now empty, remove it too.
+Ask before doing this — the user may want to keep the package warm for other workspaces.
 
 ### 7.5 — Disable / remove the Blender addon (manual)
 
@@ -499,9 +456,10 @@ If a previous install failed mid-flow: run Phase 7 first to clear stale state, t
 ## Hard rules across all phases
 
 - **Never** delete or rewrite a file the installer didn't create unless removing exactly the delimited managed block.
-- **Never** use `git add -A` or any wildcard write outside of paths under `.mcp/blender-agent/`, the user's MCP config files, the user's primary instruction file, and the skill output paths.
+- **Never** use `git add -A` or any wildcard write outside of paths under the user's MCP config files, the user's primary instruction file, and the skill output paths.
 - **Never** silently change a setting that already exists with a different value — surface to the user.
 - **Never** install Blender or Node for the user. Surface a missing prereq and stop.
 - **Never** reach into Blender to enable an addon. That's the user's manual step in Phase 6.1.
+- **Never** modify the npx cache directly except in Phase 7.4 (and only with explicit user opt-in).
 - **If you don't know, ask.** Use `AskUserQuestion` — never guess at a workspace root, a Blender version, an agent type, or a path to a global config file.
 - **Stop on first hard failure.** Surface exact output. Don't auto-retry a non-transient error.

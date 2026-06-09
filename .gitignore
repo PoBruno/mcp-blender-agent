@@ -14,6 +14,12 @@ Tools/dist/
 Tools/node_modules/
 Tools/coverage/
 
+# Generated prepack assets (built by Tools/scripts/build-addon-zip.mjs)
+Tools/assets/
+Tools/skill/
+Tools/LICENSE
+Tools/*.tgz
+
 # Python / Blender addon
 __pycache__/
 *.pyc

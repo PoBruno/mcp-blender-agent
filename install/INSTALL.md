@@ -4,68 +4,122 @@ Human-readable, step-by-step install. The agent-driven path in [`AGENT-INSTALL.m
 
 > **Prereqs:**
 > - Blender **4.2 LTS or newer** (5.x recommended; tested on 5.1.2). On `PATH` or in a default install location.
-> - **Node.js 18+** for the MCP server.
-> - **git** for the clone.
+> - **Node.js 18+** (ships with `npx`).
 >
 > **Port:** the addon listens on **`9877`** so it coexists with the popular [`ahujasid/blender-mcp`](https://github.com/ahujasid/blender-mcp) on 9876.
+>
+> **No clone, no build.** The MCP server runs straight from npm via `npx`. The Blender addon zip is bundled inside the npm package.
 
 ---
 
-## 1. Clone the repo
+## 1. Wire `blender-agent` into your agent harness
 
-Open your project in your editor (VS Code, Cursor, Claude Code, whatever) so the workspace root is well-defined, then:
+Pick the section that matches your agent. All paths are workspace-relative unless noted.
+
+### 1.1 GitHub Copilot (VS Code)
+
+Create or merge into `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "blender-agent": {
+      "command": "npx",
+      "args": ["-y", "@pobruno/blender-agent@latest"],
+      "env": { "BLENDER_PORT": "9877" }
+    }
+  }
+}
+```
+
+Run **Developer: Reload Window** (Ctrl+Shift+P). The tools appear under the Copilot Chat tool picker. The first call will be slower while `npx` fetches the package.
+
+### 1.2 Claude Code
+
+Create or merge into `.mcp.json` at the workspace root:
+
+```json
+{
+  "mcpServers": {
+    "blender-agent": {
+      "command": "npx",
+      "args": ["-y", "@pobruno/blender-agent@latest"],
+      "env": { "BLENDER_PORT": "9877" }
+    }
+  }
+}
+```
+
+Close and re-open the Claude Code session.
+
+### 1.3 Cursor
+
+`.mcp.json` at the workspace root (same shape as Claude Code), then **Developer: Reload Window**.
+
+### 1.4 Claude Desktop
+
+Edit `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
+
+```json
+{
+  "mcpServers": {
+    "blender-agent": {
+      "command": "npx",
+      "args": ["-y", "@pobruno/blender-agent@latest"],
+      "env": { "BLENDER_PORT": "9877" }
+    }
+  }
+}
+```
+
+Quit and re-open Claude Desktop.
+
+### 1.5 Windows: `npx` not on PATH
+
+If your harness can't find `npx`, point at the absolute path Node ships:
+
+```json
+{
+  "command": "C:\\Program Files\\nodejs\\npx.cmd",
+  "args": ["-y", "@pobruno/blender-agent@latest"]
+}
+```
+
+### 1.6 Version pinning (optional, recommended for teams)
+
+Replace `@latest` with a specific version (e.g. `@0.1.0`) so the whole team runs the same code:
+
+```json
+"args": ["-y", "@pobruno/blender-agent@0.1.0"]
+```
+
+Find the latest version:
 
 ```powershell
-git clone https://github.com/PoBruno/mcp-blender-agent.git .mcp/blender-agent
+npm view @pobruno/blender-agent version
 ```
-
-`.mcp/blender-agent/` is the convention used by the installer. You can put the clone anywhere — just adjust the paths below.
 
 ---
 
-## 2. Build the TypeScript MCP server
+## 2. Install the Blender addon
+
+The npm package bundles `BlenderAgent.zip`. Print its absolute path:
 
 ```powershell
-cd .mcp/blender-agent/Tools
-npm install
-npm run build
-cd ../../..
+npx -y @pobruno/blender-agent@latest --print-addon-zip
 ```
 
-This produces `.mcp/blender-agent/Tools/dist/index.js` — the entry point your agent will invoke.
+Output:
 
----
-
-## 3. Package the Blender addon
-
-The addon is the Python package at `.mcp/blender-agent/BlenderAgent/`. Zip it so Blender's GUI can install it:
-
-```powershell
-Compress-Archive `
-  -Path .mcp/blender-agent/BlenderAgent `
-  -DestinationPath .mcp/blender-agent/BlenderAgent.zip `
-  -Force
+```
+C:\Users\me\AppData\Local\npm-cache\_npx\<hash>\node_modules\@pobruno\blender-agent\assets\BlenderAgent.zip
 ```
 
-macOS / Linux:
-
-```bash
-cd .mcp/blender-agent && \
-  zip -r BlenderAgent.zip BlenderAgent -x '*/__pycache__/*' && \
-  cd ../..
-```
-
-Verify the zip contains `BlenderAgent/__init__.py` at the **top level** — Blender expects the addon folder, not its contents, at the zip root.
-
----
-
-## 4. Install the addon in Blender
-
-This is the **one manual step**. From outside Blender you can't enable an addon in another running Blender process.
+Then in Blender (the **one manual step** — from outside Blender you can't enable an addon in another running Blender process):
 
 1. Open Blender (any 4.2+ install).
 2. **Edit → Preferences → Add-ons → Install...**
-3. Navigate to `.mcp/blender-agent/BlenderAgent.zip` and click **Install Add-on**.
+3. Paste / navigate to the path above and click **Install Add-on**.
 4. In the add-on list search **"BlenderAgent"** and tick the checkbox to enable it.
 5. Click the disclosure triangle on the entry. The info panel should say `HTTP server started on port 9877`.
 6. (Optional) **Edit → Preferences → Save Preferences** so the addon auto-loads next time you open Blender.
@@ -80,83 +134,26 @@ You should see `{"ok": true, "data": { "version": "5.x.x", ... }}`.
 
 ---
 
-## 5. Wire into your agent harness
-
-Pick the section that matches your agent. All paths are **relative to the workspace root** unless noted.
-
-### 5.1 GitHub Copilot (VS Code)
-
-Create or merge into `.vscode/mcp.json`:
-
-```json
-{
-  "servers": {
-    "blender-agent": {
-      "command": "node",
-      "args": [".mcp/blender-agent/Tools/dist/index.js"],
-      "env": { "BLENDER_PORT": "9877" }
-    }
-  }
-}
-```
-
-**Developer: Reload Window** (Ctrl+Shift+P) and the tools appear under the Copilot Chat tool picker.
-
-### 5.2 Claude Code
-
-Create or merge into `.mcp.json` at the workspace root:
-
-```json
-{
-  "mcpServers": {
-    "blender-agent": {
-      "command": "node",
-      "args": [".mcp/blender-agent/Tools/dist/index.js"],
-      "env": { "BLENDER_PORT": "9877" }
-    }
-  }
-}
-```
-
-Close and re-open the Claude Code session.
-
-### 5.3 Cursor
-
-`.mcp.json` at the workspace root (same shape as Claude Code), then **Developer: Reload Window**.
-
-### 5.4 Claude Desktop
-
-Edit `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS). Use **absolute paths** — Claude Desktop has no workspace concept:
-
-```json
-{
-  "mcpServers": {
-    "blender-agent": {
-      "command": "node",
-      "args": ["C:/Users/me/my-project/.mcp/blender-agent/Tools/dist/index.js"],
-      "env": { "BLENDER_PORT": "9877" }
-    }
-  }
-}
-```
-
-Quit and re-open Claude Desktop.
-
----
-
-## 6. Install the passive context skill
+## 3. Install the passive context skill
 
 The skill makes your agent always know it controls Blender, so it picks the right tools on the first try and runs the see-and-refine loop instead of describing what it would do.
 
-Copy these files from `.mcp/blender-agent/install/context-skill/` into your harness:
+Print the bundled skill directory:
 
-| Harness | Destination |
-|---|---|
-| Claude Code | `.claude/skills/blender-agent/SKILL.md`, `FLOWS.md`, `TOOLS.md` |
-| Copilot | `.github/instructions/blender-agent.instructions.md` (renamed from `instructions.md`), `.github/instructions/blender-agent/FLOWS.md`, `TOOLS.md` |
-| Cursor / generic | `blender-agent/SKILL.md`, `FLOWS.md`, `TOOLS.md` at workspace root |
+```powershell
+npx -y @pobruno/blender-agent@latest --print-skill-dir
+```
 
-Then add the **managed block** from `.mcp/blender-agent/install/context-skill/MANAGED-BLOCK.md` (pick the section matching your harness) to your primary instruction file:
+Then copy the markdown files into your harness:
+
+| Harness | Source filename (under `<skill-dir>`) | Destination |
+|---|---|---|
+| Claude Code | `SKILL.md`, `FLOWS.md`, `TOOLS.md` | `.claude/skills/blender-agent/<filename>` |
+| Copilot | `instructions.md` | `.github/instructions/blender-agent.instructions.md` |
+| Copilot | `FLOWS.md`, `TOOLS.md` | `.github/instructions/blender-agent/<filename>` |
+| Cursor / generic | `SKILL.md`, `FLOWS.md`, `TOOLS.md` | `blender-agent/<filename>` at workspace root |
+
+Then add the **managed block** from `<skill-dir>/MANAGED-BLOCK.md` (pick the section matching your harness) to your primary instruction file:
 
 - Claude Code → `CLAUDE.md` (or create one)
 - Copilot → `.github/copilot-instructions.md` (or create one)
@@ -166,7 +163,7 @@ The block has delimiters (`<!-- BEGIN blender-agent ... <!-- END blender-agent -
 
 ---
 
-## 7. Verify end-to-end
+## 4. Verify end-to-end
 
 Ask your agent:
 
@@ -180,7 +177,7 @@ The agent should call `blender_launch` → `object_create` → `vision_snapshot`
 
 ---
 
-## 8. Optional environment variables
+## 5. Optional environment variables
 
 | Var | Default | Purpose |
 |---|---|---|
@@ -192,28 +189,57 @@ The agent should call `blender_launch` → `object_create` → `vision_snapshot`
 
 ---
 
-## 9. Uninstall
+## 6. Uninstall
 
 Reverse order:
 
 1. **Managed block** — open your primary instruction file and delete the region between (and including) the `<!-- BEGIN blender-agent` / `<!-- END blender-agent -->` delimiters. Nothing else.
-2. **Skill files** — delete the per-harness paths from §6.
-3. **MCP config** — open `.mcp.json` / `.vscode/mcp.json` and remove the `blender-agent` key only.
-4. **Clone** — `Remove-Item -Recurse -Force .mcp/blender-agent` (only if you don't want it around for other workspaces — the clone is workspace-local, so other workspaces have their own).
+2. **Skill files** — delete the per-harness paths from §3.
+3. **MCP config** — open `.mcp.json` / `.vscode/mcp.json` and remove the `blender-agent` key only. Preserve every other server.
+4. **npx cache** *(optional)* — `Remove-Item -Recurse -Force "$env:LOCALAPPDATA\npm-cache\_npx\*\node_modules\@pobruno\blender-agent"` (Windows). Frees ~1 MB. Skip if you use the package elsewhere.
 5. **Blender addon** — Blender → Edit → Preferences → Add-ons → search "BlenderAgent" → expand → **Remove** → Save Preferences.
 
 ---
 
-## 10. Troubleshooting
+## 7. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `BLENDER_UNREACHABLE` | Addon not enabled OR Blender not running | Enable the addon (§4), or set `BLENDER_BIN` for headless. |
+| `BLENDER_UNREACHABLE` | Addon not enabled OR Blender not running | Enable the addon (§2), or set `BLENDER_BIN` for headless. |
 | `BLENDER_NOT_FOUND` | Headless wanted but no `blender` binary | Install Blender 4.2 LTS or set `BLENDER_BIN`. |
 | `EXEC_PYTHON_DISABLED` | Calling `exec_python` without the env flag | Set `BLENDER_AGENT_ALLOW_EXEC_PYTHON=1` before Blender starts. |
 | `BLENDER_VERSION_UNSUPPORTED` | Blender < 4.2 | Upgrade to 4.2 LTS or newer. |
-| `HANDLER_NOT_FOUND` | TS server newer than installed addon | Re-zip and re-install the addon from `.mcp/blender-agent/BlenderAgent/` (§3–4). |
-| Tools don't show up in the agent | MCP config not reloaded | Reload the editor window / restart the agent. |
+| `HANDLER_NOT_FOUND` | TS server newer than installed addon | Re-print `--print-addon-zip` and re-install the addon in Blender. |
+| Tools don't show up in the agent | MCP config not reloaded, OR npx couldn't fetch | Reload the editor window / restart the agent. Run `npx -y @pobruno/blender-agent --version` in a terminal to confirm. |
+| First call hangs for ~30s | Cold `npx` fetch | Expected on first run. Subsequent calls are instant. |
 | Two `blender-agent` entries appear | Stale config | Open the relevant MCP config and keep only one entry. |
 
 For anything else, ask your agent to run `server_handlers` and surface every route the addon exposes, then [open an issue](https://github.com/PoBruno/mcp-blender-agent/issues).
+
+---
+
+## 8. Contributor / source install
+
+Want to hack on the MCP server? Don't use npm — work from source:
+
+```powershell
+git clone https://github.com/PoBruno/mcp-blender-agent.git
+cd mcp-blender-agent/Tools
+npm install
+npm run build
+npm run build:addon-zip
+npm test    # needs Blender 4.2 LTS on PATH or BLENDER_BIN
+```
+
+Then point your MCP config at the local `dist/index.js` instead of npx:
+
+```json
+{
+  "command": "node",
+  "args": ["D:/path/to/mcp-blender-agent/Tools/dist/index.js"]
+}
+```
+
+The Blender addon source lives at `BlenderAgent/`. Install the freshly built `Tools/assets/BlenderAgent.zip` in Blender (same GUI steps as §2).
+
+Release flow: tag `v*.*.*` on `main` → GitHub Actions publishes to npm and creates a GitHub Release with the addon zip attached. See [`.github/workflows/publish.yml`](../.github/workflows/publish.yml).
