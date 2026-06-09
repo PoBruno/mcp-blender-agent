@@ -1,11 +1,10 @@
 {
-  "_comment": "blender-agent MCP entry — uncomment after Phase 0 lands and Tools/dist/index.js exists.",
-  "_servers_template": {
+  "_comment": "blender-agent MCP entry — built via `cd Tools && npm run build`.",
+  "servers": {
     "blender-agent": {
       "command": "node",
       "args": ["${workspaceFolder}/Tools/dist/index.js"],
-      "env": { "BLENDER_PORT": "9876" }
+      "env": { "BLENDER_PORT": "9877" }
     }
-  },
-  "servers": {}
+  }
 }

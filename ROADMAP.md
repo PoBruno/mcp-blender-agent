@@ -4,6 +4,8 @@ Five phases to v1.0. Each phase ends with a green CI build, a tagged release on 
 
 The matching [SPRINTS.md](.claude/docs/SPRINTS.md) breaks each phase into actionable tasks (SN-XX format). When you start work, read SPRINTS.md, not this file.
 
+**Research foundation:** the per-pipeline feasibility study lives in [`.claude/docs/research/`](.claude/docs/research/) — start with [INDEX.md](.claude/docs/research/INDEX.md). The 228-tool catalog, type graph, BPY feasibility matrix, end-to-end workflow recipes, and UE5 target spec are all there and are authoritative for sprint planning.
+
 ---
 
 ## Phase 0 — Bootstrap
@@ -12,7 +14,7 @@ The matching [SPRINTS.md](.claude/docs/SPRINTS.md) breaks each phase into action
 
 - Repo scaffold (this commit).
 - `Tools/` skeleton: `package.json`, `tsconfig.json`, `vitest.config.ts`, `src/index.ts`, `src/blender-bridge.ts`, `src/types.ts`, `src/tools/server-status.ts`.
-- `BlenderAgent/` skeleton: `__init__.py` (addon registration), `server.py` (HTTP listener on `9876` with background thread + `bpy.app.timers` drain), `handlers/server_status.py`.
+- `BlenderAgent/` skeleton: `__init__.py` (addon registration), `server.py` (HTTP listener on `9877` with background thread + `bpy.app.timers` drain — `9876` is reserved for ahujasid's `blender-mcp`), `handlers/server_status.py`.
 - One Vitest integration test: spawn `blender --background --addons BlenderAgent`, hit `/server/status`, assert version.
 - CI: GitHub Actions matrix Windows + macOS + Linux against Blender 4.2 LTS.
 - Install brain skeleton — detect Blender version only, no real installation yet.
@@ -99,10 +101,12 @@ This is a one-developer + one-agent project. No date commitments. Phases land wh
 |---|---|---|
 | 0 | 1 | `server_status` round-trip |
 | 1 | ~30 | Create cube, parent, transform |
-| 2 | ~70 | Build stick-figure with idle anim |
-| 3 | ~100 | Procedural moss material |
-| 4 | ~130 | Build character, export FBX, import to UE5 |
-| 5 | ~140 | One-prompt install + full demo videos |
+| 2 | ~120 | Build stick-figure with idle anim; UE5 Mannequin rig; ARKit-52 face setup |
+| 3 | ~190 | Procedural moss material; node group reuse; GN forest scatter |
+| 4 | ~225 | Build character, export FBX, import to UE5; bake PBR set; cinematic render |
+| 5 | ~228 | One-prompt install + full demo videos; `exec_python` env-flagged opt-in |
+
+Counts updated from the [research catalog](.claude/docs/research/TOOL-CATALOG.md) (228 tools verified across 9 pipelines). See [ADR-013](.claude/docs/DECISIONS.md) for the count revision.
 
 ---
 

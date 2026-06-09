@@ -322,3 +322,19 @@ The passive context skill (`SKILL.md` for Claude, `instructions.md` with `applyT
 - **No Blender 3.x support.** `bpy.context.temp_override` (4.x API) is non-negotiable.
 - **No telemetry.** Zero exfiltration.
 - **No bundled external services** (Hyper3D, Sketchfab). Compose with `ahujasid/blender-mcp` instead.
+
+---
+
+## 13. Tool layering and per-domain research
+
+The 228-tool v1.0 surface is organized into 9 artist-workflow pipelines (B1..B9). Each pipeline has a feasibility study, type-graph, and tool catalog under [`research/`](research/). When designing or implementing a tool:
+
+1. Find its canonical owner pipeline in [research/TOOL-CATALOG.md](research/TOOL-CATALOG.md).
+2. Read its entry's research file (`research/pipelines/B*.md`) for full schema, API path, and error codes.
+3. Check feasibility in [research/BPY-FEASIBILITY.md](research/BPY-FEASIBILITY.md) — 🟢 ship, 🟡 ship with documented constraint, 🔴 defer or out-of-scope.
+4. Trace inputs and outputs in [research/TYPE-GRAPH.md](research/TYPE-GRAPH.md) to fill in `relatedTools.upstream[]` / `relatedTools.downstream[]`.
+5. If the tool participates in an end-to-end recipe, the recipe in [research/WORKFLOW-RECIPES.md](research/WORKFLOW-RECIPES.md) defines the integration test expectations.
+
+The research files are authoritative for tool design. This file (ARCHITECTURE.md) stays at the system-architecture level — threading, IPC, contract shape, install flow.
+
+See [DECISIONS.md ADR-012](DECISIONS.md) for the layering rationale and ADR-013 for the tool-count baseline.

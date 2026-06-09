@@ -32,7 +32,7 @@ export type ToolResult<T = unknown> = {
 
 | Code | When |
 |---|---|
-| `BLENDER_NOT_RUNNING` | Addon HTTP server unreachable on port 9876. Caller should try `ensureBlender()`. |
+| `BLENDER_NOT_RUNNING` | Addon HTTP server unreachable on port 9877. Caller should try `ensureBlender()`. |
 | `BLENDER_HTTP_FAILED` | HTTP call to addon returned non-2xx or threw. |
 | `BLENDER_TIMEOUT` | Main-thread drain didn't complete within timeout. Editor may be busy. |
 | `OBJECT_NOT_FOUND` | Named object missing in `bpy.data.objects`. |

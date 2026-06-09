@@ -6,6 +6,68 @@ Sister project to [PoBruno/mcp-unreal-agent](https://github.com/PoBruno/mcp-unre
 
 ---
 
+## ⚡ Install in one prompt
+
+Open your project in your editor, then paste the matching prompt into your agent chat. The MCP server runs straight from npm via `npx` — **no clone, no build**. The Blender addon zip is bundled inside the npm package; the agent will print its path so you can drop it into Blender's Add-ons UI. Prereqs: **Blender 4.2 LTS+ (5.x recommended)**, **Node 18+**.
+
+### Claude Code
+
+```
+Install @pobruno/blender-agent into this workspace. Read install/AGENT-INSTALL.md
+from https://github.com/PoBruno/mcp-blender-agent and run every phase. Merge
+{ "command": "npx", "args": ["-y", "@pobruno/blender-agent@latest"] } into
+.mcp.json, then run `npx -y @pobruno/blender-agent --print-skill-dir` and copy
+the bundled SKILL/FLOWS/TOOLS markdown into .claude/skills/blender-agent/.
+Inject the managed block from MANAGED-BLOCK.md into CLAUDE.md. Use
+AskUserQuestion before anything destructive. Print the path from
+`--print-addon-zip` so I can install it in Blender's Add-ons UI.
+```
+
+### GitHub Copilot (VS Code)
+
+```
+Install @pobruno/blender-agent into this workspace. Read install/AGENT-INSTALL.md
+from https://github.com/PoBruno/mcp-blender-agent and run every phase. Merge
+{ "command": "npx", "args": ["-y", "@pobruno/blender-agent@latest"] } into
+.vscode/mcp.json, then run `npx -y @pobruno/blender-agent --print-skill-dir`
+and copy the bundled instructions.md to .github/instructions/blender-agent.instructions.md
+plus FLOWS/TOOLS to .github/instructions/blender-agent/. Inject the managed
+block from MANAGED-BLOCK.md into .github/copilot-instructions.md. Use
+AskUserQuestion before anything destructive. Print the path from
+`--print-addon-zip` so I can install it in Blender's Add-ons UI.
+```
+
+### Cursor
+
+```
+Install @pobruno/blender-agent into this workspace. Read install/AGENT-INSTALL.md
+from https://github.com/PoBruno/mcp-blender-agent and run every phase. Merge
+{ "command": "npx", "args": ["-y", "@pobruno/blender-agent@latest"] } into
+.mcp.json, then run `npx -y @pobruno/blender-agent --print-skill-dir` and copy
+the bundled SKILL/FLOWS/TOOLS markdown into ./blender-agent/. Inject the
+managed block from MANAGED-BLOCK.md into AGENTS.md. Ask before anything
+destructive. Print the path from `--print-addon-zip` so I can install it in
+Blender's Add-ons UI.
+```
+
+### Claude Desktop
+
+```
+Install @pobruno/blender-agent for me. Read install/AGENT-INSTALL.md from
+https://github.com/PoBruno/mcp-blender-agent and run every phase. Merge
+{ "command": "npx", "args": ["-y", "@pobruno/blender-agent@latest"] } into
+%APPDATA%\Claude\claude_desktop_config.json. Tell me when I need to restart
+Claude Desktop. Ask before anything destructive. Print the path from
+`npx -y @pobruno/blender-agent --print-addon-zip` so I can install it in
+Blender's Add-ons UI.
+```
+
+One manual step you'll do yourself: install `BlenderAgent.zip` (path printed by `--print-addon-zip`) via Blender → Edit → Preferences → Add-ons → Install... — the agent can't reach into a separate Blender process to enable a plugin.
+
+After install, the agent reads the bundled `SKILL.md` on every 3D request — so it always knows it drives Blender, launches first, and runs the see-and-refine loop. Manual install reference: [install/INSTALL.md](install/INSTALL.md). More copy-paste workflow prompts: [install/PROMPT-TEMPLATES.md](install/PROMPT-TEMPLATES.md).
+
+---
+
 ## Why this exists
 
 The Blender MCP space today is dominated by **creative toys**: "make a dungeon scene", "apply a red metallic material". Those exist (see [ahujasid/blender-mcp](https://github.com/ahujasid/blender-mcp), 22k+ stars) and they're great for ideation.
@@ -27,7 +89,7 @@ The agent should be able to describe a low-poly character — bones, weights, so
 
 Two parts, mirroring `mcp-unreal-agent`:
 
-- **`BlenderAgent/` — Python addon** that lives inside Blender (or runs headless via `blender --background`). Hosts an HTTP server on port `9876`. Calls `bpy.data`, `bpy.ops`, `bmesh`, `mathutils` directly. No build step.
+- **`BlenderAgent/` — Python addon** that lives inside Blender (or runs headless via `blender --background`). Hosts an HTTP server on port `9877` (different from the dominant `blender-mcp` plugin on 9876 — they coexist). Calls `bpy.data`, `bpy.ops`, `bmesh`, `mathutils` directly. No build step.
 - **`Tools/` — TypeScript MCP server.** Translates MCP tool calls from the agent into HTTP calls to the addon. Ships the structured tool contract, ID-chain, error registry, install brain, and passive context skill.
 
 Two serving modes:
@@ -39,19 +101,25 @@ Two serving modes:
 
 ## Status
 
-🚧 **Phase 0 — bootstrap.** Harness in place, no tools implemented yet. See [ROADMAP.md](ROADMAP.md) and [OBJECTIVES.md](OBJECTIVES.md).
+**Sprints 0–6 shipped. v1.0 candidate on Blender 5.1.2.** Addon (41 handler modules, 212 routes), TS server (20 tool files, ~216 MCP tools), full integration suite — **211 cases passing** on real Blender 5.1.2 (Steam install, port 9877 coexisting with ahujasid `blender-mcp` on 9876). Distributed as the `@pobruno/blender-agent` npm package (server + bundled Blender addon zip + passive context skill); GitHub Actions publishes on tag push to `main`. One-prompt install via `npx -y @pobruno/blender-agent@latest`. See [.claude/docs/SPRINTS.md](.claude/docs/SPRINTS.md) for the per-task done log.
 
 ---
 
-## Quick start (for now: developers only)
+## Quick start (manual — for contributors)
 
 ```powershell
 git clone https://github.com/PoBruno/mcp-blender-agent.git
-cd mcp-blender-agent
-# Phase 0: nothing to run yet. Open in VS Code and follow CLAUDE.md / .github/copilot-instructions.md.
+cd mcp-blender-agent/Tools
+npm install
+npm run build
+npm run build:addon-zip
+# Need Blender 4.2 LTS or newer (5.x recommended) on PATH (or BLENDER_BIN) to run the integration tests:
+npm test
 ```
 
-End-user install playbook ([install/AGENT-INSTALL.md](install/AGENT-INSTALL.md)) ships with Phase 5.
+End users: use the one-prompt install above — `npx` fetches the published package, no clone needed.
+
+End-user install reference: [install/INSTALL.md](install/INSTALL.md). Agent-driven install playbook: [install/AGENT-INSTALL.md](install/AGENT-INSTALL.md). Copy-paste prompts: [install/PROMPT-TEMPLATES.md](install/PROMPT-TEMPLATES.md).
 
 ---
 
