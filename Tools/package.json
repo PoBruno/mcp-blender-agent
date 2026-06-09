@@ -1,6 +1,6 @@
 {
   "name": "@pobruno/blender-agent",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP server giving AI agents complete deterministic control of Blender 4.2 LTS+ (modeling, rigging, animation, materials, shader/geometry nodes, rendering, granular import/export).",
   "keywords": [
     "mcp",

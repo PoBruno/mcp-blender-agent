@@ -20,7 +20,7 @@
  * AI agents) can call without booting the MCP transport first.
  */
 
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 
@@ -90,8 +90,10 @@ function printSkillDir() {
 
 async function runServer() {
   // Delegate to the compiled MCP server entry. Keep this dynamic so --print-addon-zip
-  // doesn't pay the SDK import cost.
-  await import(resolve(packageRoot, "dist", "index.js"));
+  // doesn't pay the SDK import cost. Wrap in pathToFileURL — on Windows the ESM loader
+  // refuses bare absolute paths (D:\...) and requires a file:// URL.
+  const entry = pathToFileURL(resolve(packageRoot, "dist", "index.js")).href;
+  await import(entry);
 }
 
 switch (flag) {
