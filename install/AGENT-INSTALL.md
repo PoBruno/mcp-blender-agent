@@ -45,17 +45,25 @@ blender --background --python-expr "import bpy, os; bpy.ops.preferences.addon_in
 
 For per-harness config: see [INSTALL.md §3](INSTALL.md#3-wire-into-your-agent-harness) for the exact JSON snippets. Merge into the existing file — do not overwrite.
 
-## Phase 5 — Inject context skill
+## Phase 5 — Inject the passive context skill
 
-Copy `install/context-skill/` into the harness skill directory (when one exists). This gives the agent passive context about the available tools.
+Copy `install/context-skill/SKILL.md` into the harness skill directory so the agent always loads "I control Blender" context on any 3D request. Drop location per harness:
+
+- **Claude Code:** `<project>/.claude/skills/blender-agent-control/SKILL.md` (project) or `~/.claude/skills/blender-agent-control/SKILL.md` (global).
+- **Cursor / Cline / Windsurf:** append the skill body into the project rules file the harness reads (e.g. `.cursor/rules/` or `AGENTS.md`), since they have no skill folder.
+- **GitHub Copilot:** add a one-line pointer in `.github/copilot-instructions.md` — "On any 3D/Blender request, read `install/context-skill/SKILL.md` first." Copilot has no skill loader; the instructions file is the passive hook.
+- **Claude Desktop:** paste the skill body into the conversation's project instructions / a pinned message.
+
+This is what makes the chat *always* know it drives Blender, launches first, and runs the see-and-refine loop — not just "has some tools".
 
 ## Phase 6 — Verify
 
 Run, in sequence:
 
-1. `curl http://127.0.0.1:9877/server/status` — expect `ok: true` and `version` matching `^(4|5)\.`.
-2. Through the harness, invoke the `server_status` MCP tool — expect the same response.
-3. Through the harness, invoke `server_handlers` — expect a list including `POST /scene/create`, `POST /object/create`, `POST /export/fbx_static`.
+1. Through the harness, invoke **`blender_launch`** — expect `ok: true` (reuses an open Blender or starts a GUI one).
+2. Invoke `server_status` — expect `version` matching `^(4|5)\.`.
+3. Invoke `server_handlers` — expect a list including `POST /object/create`, `POST /vision/snapshot`, `POST /export/fbx_static`.
+4. Optional smoke: `object_create` a cube, then `vision_snapshot` — confirm a PNG is written.
 
 If any step fails, surface the exact error and the matching row from [INSTALL.md §7](INSTALL.md#7-troubleshooting).
 

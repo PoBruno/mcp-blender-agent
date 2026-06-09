@@ -116,6 +116,8 @@ def mesh_shade_smooth(body: dict[str, Any]) -> dict[str, Any]:
     _ensure_mesh(obj)
     with composite_undo(f"mesh_shade_smooth:{obj.name}"):
         set_active_and_selected(obj)
+        if obj.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
         with with_3dview_context():
             bpy.ops.object.shade_smooth()
     return {"ok": True, "data": {"objectName": obj.name}, "refs": {"objectName": obj.name}}
@@ -128,6 +130,8 @@ def mesh_shade_flat(body: dict[str, Any]) -> dict[str, Any]:
     _ensure_mesh(obj)
     with composite_undo(f"mesh_shade_flat:{obj.name}"):
         set_active_and_selected(obj)
+        if obj.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
         with with_3dview_context():
             bpy.ops.object.shade_flat()
     return {"ok": True, "data": {"objectName": obj.name}, "refs": {"objectName": obj.name}}

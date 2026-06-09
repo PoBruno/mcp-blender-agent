@@ -71,12 +71,18 @@ export function registerTools<Shape extends z.ZodRawShape>(
   }
 }
 
-/** Convenience for "POST /<path>" forwarding tools. */
+/** Convenience for "POST /<path>" forwarding tools.
+ *
+ * `opts.timeoutMs` overrides the bridge's default HTTP timeout — set it for
+ * tools that wrap a heavy main-thread op (render, bake, remesh) so the client
+ * waits long enough for the legitimate result instead of aborting early.
+ */
 export function passthroughPost<Shape extends z.ZodRawShape>(
   path: string,
+  opts?: { timeoutMs?: number },
 ): (args: z.infer<z.ZodObject<Shape>>) => Promise<ToolResult> {
   return async (args) => {
-    const res = await blenderPost(path, args as Record<string, unknown>);
+    const res = await blenderPost(path, args as Record<string, unknown>, opts?.timeoutMs);
     return res;
   };
 }
@@ -84,9 +90,10 @@ export function passthroughPost<Shape extends z.ZodRawShape>(
 /** Convenience for "GET /<path>" forwarding tools. */
 export function passthroughGet<Shape extends z.ZodRawShape>(
   path: string,
+  opts?: { timeoutMs?: number },
 ): (_args: z.infer<z.ZodObject<Shape>>) => Promise<ToolResult> {
   return async () => {
-    const res = await blenderGet(path);
+    const res = await blenderGet(path, opts?.timeoutMs);
     return res;
   };
 }

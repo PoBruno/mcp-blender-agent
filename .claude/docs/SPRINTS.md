@@ -127,6 +127,40 @@ Outline:
 
 ---
 
+## Sprint 6 — Live-test gaps & UX hardening
+
+Source: live agent runs (chair + lowpoly character + 3 animations) surfaced real bugs and missing affordances. Bugs S6-01..05 are **fixed + verified**; the rest is the backlog from the gap analysis.
+
+### Bugs (fixed 2026-06-09)
+- [x] **S6-01** Per-handler timeouts + EEVEE/low-sample critique renders (killed the 30s main-thread cascade) <!-- done: 2026-06-09 -->
+- [x] **S6-02** GUI lifecycle: `blender_launch`/`blender_quit`/`addon_restart` MCP tools + `vision_snapshot` (viewport-or-render fallback) <!-- done: 2026-06-09 -->
+- [x] **S6-03** `value`/`params` stringify fix — `coerce_value` helper applied at shader_node/modifier/light/geo_node boundaries; TS `value` schema typed <!-- done: 2026-06-09 -->
+- [x] **S6-04** `keyframe_bone_pose` default channels chosen by bone `rotation_mode` (euler poses now keyed on rotation_euler) <!-- done: 2026-06-09 -->
+- [x] **S6-05** `mesh_shade_smooth`/`shade_flat` force OBJECT mode; `nla_push_action_to_strip` reuses named track (no dup); `action_create` fake-user by default <!-- done: 2026-06-09 -->
+
+### Missing low-level tools (friction in live runs)
+- [ ] **S6-06** `object_apply_transform` (loc/rot/scale) — non-uniform scale breaks Bevel/Solidify width; had to delete+recreate to bake scale
+- [ ] **S6-07** `object_set_mode` (OBJECT/EDIT/POSE/SCULPT) — residual Sculpt mode broke operators with no recovery path
+- [ ] **S6-08** `scene_set_view_transform` (Standard/AgX/Filmic + exposure/look) — AgX washed out the red chair / blue shirt; biggest color-fidelity win
+- [ ] **S6-09** `material_set_principled` — base color + roughness + metallic + emission in one call (today 2+ shader_node calls)
+- [ ] **S6-10** `object_rename`
+
+### High-value animation composites (cut call count ~10x)
+- [ ] **S6-11** `pose_set` — apply `{bone: euler}` for many bones + keyframe in one call
+- [ ] **S6-12** `action_mirror` / `pose_flip_LR` — auto-generate the opposite-side keys for symmetric cycles
+- [ ] **S6-13** `armature_create_biped` — humanoid skeleton preset (was 1+19 calls)
+- [ ] **S6-14** `vision_render_action` — render an action's frames to a gif/strip so the agent can SEE motion (closes the animation feedback loop)
+
+### Strategic
+- [ ] **S6-15** Image-to-3D bridge (Hunyuan3D local / Tripo / Meshy) — the real path for organic/photoreal from a reference; primitives only ever yield blockouts
+- [ ] **S6-16** Silhouette error-map critique (render-vs-reference IoU + diff heatmap) — automates the refine loop
+- [ ] **S6-17** Batch/transaction endpoint — run N ops atomically to cut round-trips on multi-part builds
+
+### Test coverage gaps
+- [ ] **S6-18** Tests for: shader/geo `value` types (float/color/vector incl. stringified), `keyframe_bone_pose` euler-vs-quaternion default, operator mode-guard paths
+
+---
+
 ## Done log
 
 ### 2026-06-08 — bulk delivery (S0–S5 scaffold)

@@ -34,6 +34,12 @@ _server_thread: Optional[threading.Thread] = None
 _shutdown_event = threading.Event()
 _drain_registered = False
 
+# Default main-thread timeout for a handler. Light ops finish in well under a
+# second; heavy ones (render, bake, remesh) declare their own via the decorator
+# so a slow-but-legitimate render does not get killed mid-flight and wedge the
+# main thread for every request that follows it.
+_DEFAULT_HANDLER_TIMEOUT = 30.0
+
 
 # ----------------------------------------------------------------------------
 # Handler registry
@@ -41,9 +47,11 @@ _drain_registered = False
 
 # Map of (method, path) → callable(body_dict) → response_dict
 _handlers: dict[tuple[str, str], Callable[[dict[str, Any]], dict[str, Any]]] = {}
+# Map of (method, path) → main-thread timeout in seconds.
+_handler_timeouts: dict[tuple[str, str], float] = {}
 
 
-def handler(method: str, path: str) -> Callable[
+def handler(method: str, path: str, *, timeout: float = _DEFAULT_HANDLER_TIMEOUT) -> Callable[
     [Callable[[dict[str, Any]], dict[str, Any]]],
     Callable[[dict[str, Any]], dict[str, Any]],
 ]:
@@ -53,6 +61,11 @@ def handler(method: str, path: str) -> Callable[
     and returns the response dict. It is called on the **main thread** via the
     timer drain, so it may freely call `bpy.*`.
 
+    `timeout` is the main-thread budget in seconds. Heavy operations (renders,
+    bakes, remeshes) MUST raise it above the 30s default — otherwise the job is
+    declared timed-out while it is still running synchronously on the main
+    thread, blocking the drain for every subsequent request (cascading freeze).
+
     Exceptions are caught at the boundary and converted to
     `{"ok": False, "errorCode": "...", "message": "..."}`.
     """
@@ -61,6 +74,7 @@ def handler(method: str, path: str) -> Callable[
         if key in _handlers:
             raise RuntimeError(f"Duplicate handler registration for {method} {path}")
         _handlers[key] = fn
+        _handler_timeouts[key] = timeout
         return fn
     return decorator
 
@@ -171,7 +185,8 @@ class _RequestHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            result = _run_on_main_thread(lambda: fn(body))
+            timeout = _handler_timeouts.get(key, _DEFAULT_HANDLER_TIMEOUT)
+            result = _run_on_main_thread(lambda: fn(body), timeout=timeout)
         except TimeoutError as exc:
             self._send_json(504, {
                 "ok": False,
@@ -400,6 +415,59 @@ def _server_blender_quit(body: dict[str, Any]) -> dict[str, Any]:
         "ok": True,
         "data": {"quitting": True, "delay": delay, "saveAs": save_as},
     }
+
+
+@handler("POST", "/batch", timeout=900.0)
+def _batch(body: dict[str, Any]) -> dict[str, Any]:
+    """Run many tool calls in one request (S6-17).
+
+    The whole batch executes inside a single main-thread drain job, so there is
+    no per-op HTTP round-trip and the sequence is not interleaved with other
+    requests. Each op = {path, method?='POST', body?={}}.
+
+    Body: { ops: [ {path, method?, body?}, ... ], stopOnError?: bool=true }
+    Returns { ok, data: { results: [{index, path, ok, ...}], count, failedAt? } }.
+    """
+    ops = body.get("ops")
+    if not isinstance(ops, list) or not ops:
+        return {"ok": False, "errorCode": "INVALID_INPUT", "message": "ops must be a non-empty list"}
+    stop_on_error = bool(body.get("stopOnError", True))
+
+    results: list[dict[str, Any]] = []
+    ok_all = True
+    failed_at: Optional[int] = None
+    for i, op in enumerate(ops):
+        if not isinstance(op, dict) or not op.get("path"):
+            res = {"ok": False, "errorCode": "INVALID_INPUT", "message": "each op needs a 'path'"}
+        else:
+            method = str(op.get("method", "POST")).upper()
+            path = op["path"]
+            op_body = op.get("body") or {}
+            fn = _handlers.get((method, path))
+            if fn is None:
+                res = {"ok": False, "errorCode": "HANDLER_NOT_FOUND",
+                       "message": f"no handler for {method} {path}"}
+            else:
+                try:
+                    res = fn(op_body)
+                    if not isinstance(res, dict):
+                        res = {"ok": True, "data": res}
+                    res.setdefault("ok", True)
+                except BaseException as exc:  # noqa: BLE001
+                    res = {"ok": False,
+                           "errorCode": getattr(exc, "error_code", "INTERNAL_ERROR"),
+                           "message": str(exc)}
+        results.append({"index": i, "path": op.get("path") if isinstance(op, dict) else None, **res})
+        if not res.get("ok", True):
+            ok_all = False
+            failed_at = i
+            if stop_on_error:
+                break
+
+    data: dict[str, Any] = {"results": results, "count": len(results)}
+    if failed_at is not None:
+        data["failedAt"] = failed_at
+    return {"ok": ok_all, "data": data}
 
 
 @handler("GET", "/server/handlers")

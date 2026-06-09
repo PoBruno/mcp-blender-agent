@@ -23,6 +23,17 @@ export function registerArmatureTools(server: McpServer): void {
       handler: passthroughPost("/armature/create"),
     },
     {
+      name: "armature_create_biped",
+      description:
+        "Create a full 19-bone humanoid skeleton in ONE call (pelvis→spine→chest→neck→head, shoulder/upperarm/forearm/hand L+R, thigh/shin/foot L+R). Coordinates scale with height. Then skin a mesh with armature_parent_with_auto_weights.",
+      inputSchema: {
+        name: z.string().optional().describe("Armature object name (default 'Rig')."),
+        height: z.number().positive().optional().describe("Total height in meters (default 1.8)."),
+        location: Vec3.optional().describe("World location of the armature."),
+      },
+      handler: passthroughPost("/armature/create_biped"),
+    },
+    {
       name: "armature_show_in_front",
       description: "Toggle armature display 'show_in_front'.",
       inputSchema: {

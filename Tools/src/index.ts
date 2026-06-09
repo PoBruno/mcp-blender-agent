@@ -66,6 +66,7 @@ import { registerExecTools } from "./tools/exec.js";
 import { registerVisionTools } from "./tools/vision.js";
 import { registerPostprocTools } from "./tools/postproc.js";
 import { registerParametricTools } from "./tools/parametric.js";
+import { registerGenerateTools } from "./tools/generate.js";
 
 export function buildServer(): McpServer {
   const server = new McpServer({
@@ -126,6 +127,7 @@ export function buildServer(): McpServer {
   registerVisionTools(server);
   registerPostprocTools(server);
   registerParametricTools(server);
+  registerGenerateTools(server);
 
   return server;
 }

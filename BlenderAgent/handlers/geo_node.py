@@ -11,6 +11,7 @@ from typing import Any
 from ..helpers import (
     InvalidInputError,
     NodeNotFoundError,
+    coerce_value,
     composite_undo,
     get_object,
 )
@@ -162,7 +163,7 @@ def geo_node_set_node_input(body: dict[str, Any]) -> dict[str, Any]:
     else:
         if "value" not in body:
             raise InvalidInputError("value (or valueObjectName) is required")
-        value = body["value"]
+        value = coerce_value(body["value"])
 
     with composite_undo(f"geo_node_set_node_input:{tree.name}/{node.name}.{input_name}"):
         try:

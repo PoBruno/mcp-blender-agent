@@ -6,6 +6,7 @@ from typing import Any
 
 from ..helpers import (
     InvalidInputError,
+    coerce_value,
     composite_undo,
     get_collection,
     get_object,
@@ -67,7 +68,7 @@ def light_set_property(body: dict[str, Any]) -> dict[str, Any]:
     with composite_undo(f"light_set_property:{obj.name}"):
         for k, v in props.items():
             if hasattr(obj.data, k):
-                setattr(obj.data, k, v)
+                setattr(obj.data, k, coerce_value(v))
     return {
         "ok": True,
         "data": {"objectName": obj.name, "updated": list(props.keys())},

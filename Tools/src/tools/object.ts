@@ -28,6 +28,39 @@ export function registerObjectTools(server: McpServer): void {
       handler: passthroughPost("/object/create"),
     },
     {
+      name: "object_apply_transform",
+      description:
+        "Bake object location/rotation/scale into mesh data (transform_apply). Apply SCALE before width-based ops (Bevel/Solidify) — non-uniform object scale distorts them. Defaults to scale only.",
+      inputSchema: {
+        objectName: z.string().describe("Object to apply."),
+        location: z.boolean().optional().describe("Apply location (default false)."),
+        rotation: z.boolean().optional().describe("Apply rotation (default false)."),
+        scale: z.boolean().optional().describe("Apply scale (default true)."),
+      },
+      handler: passthroughPost("/object/apply_transform"),
+    },
+    {
+      name: "object_set_mode",
+      description:
+        "Switch an object into a mode. Use to recover from a stuck Sculpt/Edit mode that makes operators (shade_smooth, join) fail their poll.",
+      inputSchema: {
+        objectName: z.string().describe("Object."),
+        mode: z
+          .enum(["OBJECT", "EDIT", "POSE", "SCULPT", "VERTEX_PAINT", "WEIGHT_PAINT", "TEXTURE_PAINT"])
+          .describe("Target mode."),
+      },
+      handler: passthroughPost("/object/set_mode"),
+    },
+    {
+      name: "object_rename",
+      description: "Rename an object. Blender may auto-suffix on collision; the final name is returned.",
+      inputSchema: {
+        objectName: z.string().describe("Current name."),
+        newName: z.string().describe("Desired new name."),
+      },
+      handler: passthroughPost("/object/rename"),
+    },
+    {
       name: "object_add_blockout",
       description:
         "Add a cube blockout sized to a footprint (w,d,h in BU). Scale applied so dimensions match.",

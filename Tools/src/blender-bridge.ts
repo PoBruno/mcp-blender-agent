@@ -17,6 +17,7 @@ const DEFAULT_HOST = process.env.BLENDER_HOST ?? "127.0.0.1";
 const DEFAULT_TIMEOUT_MS = Number(process.env.BLENDER_TIMEOUT_MS ?? 60_000);
 
 let headlessProcess: ChildProcess | null = null;
+let guiProcess: ChildProcess | null = null;
 
 function baseUrl(): string {
   return `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
@@ -35,10 +36,16 @@ export class BlenderBridgeError extends Error {
   }
 }
 
-async function request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<BlenderResponse<T>> {
+async function request<T>(
+  method: "GET" | "POST",
+  path: string,
+  body?: unknown,
+  timeoutMs?: number,
+): Promise<BlenderResponse<T>> {
   const url = `${baseUrl()}${path}`;
   const controller = new AbortController();
-  const timeoutHandle = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  const effectiveTimeout = timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutHandle = setTimeout(() => controller.abort(), effectiveTimeout);
   let response: Response;
   try {
     response = await fetch(url, {
@@ -51,7 +58,7 @@ async function request<T>(method: "GET" | "POST", path: string, body?: unknown):
     clearTimeout(timeoutHandle);
     if ((err as Error).name === "AbortError") {
       throw new BlenderBridgeError(
-        `Request to Blender timed out after ${DEFAULT_TIMEOUT_MS}ms`,
+        `Request to Blender timed out after ${effectiveTimeout}ms`,
         "BLENDER_TIMEOUT",
       );
     }
@@ -90,12 +97,16 @@ async function request<T>(method: "GET" | "POST", path: string, body?: unknown):
   return payload as BlenderResponse<T>;
 }
 
-export async function blenderGet<T>(path: string): Promise<BlenderResponse<T>> {
-  return request<T>("GET", path);
+export async function blenderGet<T>(path: string, timeoutMs?: number): Promise<BlenderResponse<T>> {
+  return request<T>("GET", path, undefined, timeoutMs);
 }
 
-export async function blenderPost<T>(path: string, body: Record<string, unknown> = {}): Promise<BlenderResponse<T>> {
-  return request<T>("POST", path, body);
+export async function blenderPost<T>(
+  path: string,
+  body: Record<string, unknown> = {},
+  timeoutMs?: number,
+): Promise<BlenderResponse<T>> {
+  return request<T>("POST", path, body, timeoutMs);
 }
 
 export async function isBlenderReachable(): Promise<boolean> {
@@ -172,6 +183,74 @@ export async function ensureBlenderRunning(opts?: { timeoutMs?: number }): Promi
   }
   throw new BlenderBridgeError(
     `Headless Blender did not respond within ${timeoutMs}ms`,
+    "BLENDER_TIMEOUT",
+  );
+}
+
+/**
+ * Bootstrap snippet run by a freshly spawned GUI Blender. Tries to enable an
+ * installed BlenderAgent addon; if it isn't installed, injects the repo onto
+ * sys.path and registers it directly. `register()` is idempotent (server.start
+ * no-ops if already running) so the double path is safe.
+ */
+function guiBootstrap(): string {
+  return [
+    "import sys, os, importlib.util",
+    "repo = os.environ.get('BLENDER_AGENT_REPO')",
+    "import bpy",
+    "try:",
+    "    bpy.ops.preferences.addon_enable(module='BlenderAgent')",
+    "except Exception:",
+    "    pass",
+    "if importlib.util.find_spec('BlenderAgent') is None and repo:",
+    "    sys.path.insert(0, repo)",
+    "try:",
+    "    import BlenderAgent",
+    "    BlenderAgent.register()",
+    "except Exception as exc:",
+    "    print('BlenderAgent bootstrap failed:', exc)",
+  ].join("\n");
+}
+
+/**
+ * Ensure a GUI Blender is running with the addon online. Idempotent — if one is
+ * already reachable on the port it is reused (the "use the open Blender" path).
+ * Otherwise spawns Blender from the default path (no --background, real window)
+ * and waits for the HTTP server to come up.
+ */
+export async function launchBlenderGui(
+  opts?: { timeoutMs?: number; blendFile?: string },
+): Promise<{ alreadyRunning: boolean; binary?: string }> {
+  if (await isBlenderReachable()) return { alreadyRunning: true };
+
+  const bin = findBlenderBinary();
+  if (!bin) {
+    throw new BlenderBridgeError(
+      "Blender not reachable and no executable found. Set BLENDER_BIN or install Blender 4.2+ (5.x recommended).",
+      "BLENDER_NOT_FOUND",
+    );
+  }
+
+  const repo = process.env.BLENDER_AGENT_REPO ?? resolve(process.cwd(), "..");
+  const args: string[] = [];
+  if (opts?.blendFile) args.push(opts.blendFile);
+  args.push("--python-expr", guiBootstrap());
+
+  guiProcess = spawn(bin, args, {
+    env: { ...process.env, BLENDER_AGENT_REPO: repo, BLENDER_AGENT_PORT: String(DEFAULT_PORT) },
+    stdio: "ignore",
+    detached: true,
+  });
+  guiProcess.unref();
+
+  const timeoutMs = opts?.timeoutMs ?? 60_000;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await isBlenderReachable()) return { alreadyRunning: false, binary: bin };
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  throw new BlenderBridgeError(
+    `GUI Blender was spawned but did not come online within ${timeoutMs}ms`,
     "BLENDER_TIMEOUT",
   );
 }

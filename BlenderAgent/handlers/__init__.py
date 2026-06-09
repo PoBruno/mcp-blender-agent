@@ -54,3 +54,4 @@ from . import exec_python  # noqa: F401
 from . import vision  # noqa: F401
 from . import postproc  # noqa: F401
 from . import parametric  # noqa: F401
+from . import generate  # noqa: F401

@@ -31,6 +31,10 @@ Skills are domain knowledge packs in [`.claude/skills/`](../.claude/skills/). Ea
 
 When the user's request matches a skill's topic, read the corresponding `SKILL.md` before writing code.
 
+## Passive Blender control (always on)
+
+If the **blender-agent** MCP is connected and the user asks to model, rig, animate, texture, light, render, or export anything in 3D (or mentions Blender), **read [`install/context-skill/SKILL.md`](../install/context-skill/SKILL.md) first**. You control a live Blender session: call `blender_launch` before any modeling, then drive the tools and use `vision_snapshot` to see and refine. Don't just describe — execute.
+
 ## Hard rules (Copilot-relevant subset)
 
 - **Build after every change.** TS: `cd Tools && npm run build`. Python: reload the addon in Blender (or restart `blender --background` in tests). Do not declare done before the build passes.

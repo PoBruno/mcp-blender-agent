@@ -64,7 +64,7 @@ def render_set_resolution(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@handler("POST", "/render/render_still")
+@handler("POST", "/render/render_still", timeout=300.0)
 def render_render_still(body: dict[str, Any]) -> dict[str, Any]:
     """Render a single frame and save to filepath."""
     import bpy  # type: ignore
@@ -85,7 +85,7 @@ def render_render_still(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@handler("POST", "/render/render_animation")
+@handler("POST", "/render/render_animation", timeout=900.0)
 def render_render_animation(body: dict[str, Any]) -> dict[str, Any]:
     import bpy  # type: ignore
     scene = get_scene(body.get("sceneName"))
@@ -105,6 +105,49 @@ def render_render_animation(body: dict[str, Any]) -> dict[str, Any]:
             "filepathPrefix": scene.render.filepath,
             "frameStart": scene.frame_start,
             "frameEnd": scene.frame_end,
+        },
+        "refs": {"sceneName": scene.name},
+    }
+
+
+@handler("POST", "/render/set_view_transform")
+def render_set_view_transform(body: dict[str, Any]) -> dict[str, Any]:
+    """Set the scene color-management view transform (S6-08).
+
+    Body: {sceneName?, viewTransform?: 'Standard'|'AgX'|'Filmic'|...,
+           look?: str, exposure?: float, gamma?: float}
+    Default Blender uses AgX which desaturates — set 'Standard' for vivid,
+    reference-true color.
+    """
+    scene = get_scene(body.get("sceneName"))
+    vs = scene.view_settings
+    vt = body.get("viewTransform")
+    look = body.get("look")
+    exposure = body.get("exposure")
+    gamma = body.get("gamma")
+    with composite_undo(f"render_set_view_transform:{scene.name}"):
+        if vt is not None:
+            try:
+                vs.view_transform = str(vt)
+            except (TypeError, ValueError) as exc:
+                raise InvalidInputError(f"Unknown viewTransform {vt!r}: {exc}") from exc
+        if look is not None:
+            try:
+                vs.look = str(look)
+            except (TypeError, ValueError):
+                pass
+        if exposure is not None:
+            vs.exposure = float(exposure)
+        if gamma is not None:
+            vs.gamma = float(gamma)
+    return {
+        "ok": True,
+        "data": {
+            "sceneName": scene.name,
+            "viewTransform": vs.view_transform,
+            "look": vs.look,
+            "exposure": vs.exposure,
+            "gamma": vs.gamma,
         },
         "refs": {"sceneName": scene.name},
     }

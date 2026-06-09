@@ -161,6 +161,85 @@ def armature_add_ue5_ik_bones(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Humanoid biped layout, validated on a ~1.8 m lowpoly character. Coordinates
+# are scaled by (height / 1.8) at build time. (head, tail, parent, connect)
+_BIPED_BONES: list[dict[str, Any]] = [
+    {"name": "pelvis",     "head": (0, 0, 0.92), "tail": (0, 0, 1.05), "parent": None,       "connect": False},
+    {"name": "spine",      "head": (0, 0, 1.05), "tail": (0, 0, 1.25), "parent": "pelvis",   "connect": True},
+    {"name": "chest",      "head": (0, 0, 1.25), "tail": (0, 0, 1.40), "parent": "spine",    "connect": True},
+    {"name": "neck",       "head": (0, 0, 1.40), "tail": (0, 0, 1.48), "parent": "chest",    "connect": True},
+    {"name": "head",       "head": (0, 0, 1.48), "tail": (0, 0, 1.77), "parent": "neck",     "connect": True},
+    {"name": "shoulder_L", "head": (0.05, 0, 1.38), "tail": (0.20, 0, 1.38), "parent": "chest", "connect": False},
+    {"name": "upperarm_L", "head": (0.23, 0, 1.38), "tail": (0.23, 0, 1.10), "parent": "shoulder_L", "connect": False},
+    {"name": "forearm_L",  "head": (0.23, 0, 1.10), "tail": (0.23, 0, 0.83), "parent": "upperarm_L", "connect": True},
+    {"name": "hand_L",     "head": (0.23, 0, 0.83), "tail": (0.23, 0, 0.68), "parent": "forearm_L",  "connect": True},
+    {"name": "shoulder_R", "head": (-0.05, 0, 1.38), "tail": (-0.20, 0, 1.38), "parent": "chest", "connect": False},
+    {"name": "upperarm_R", "head": (-0.23, 0, 1.38), "tail": (-0.23, 0, 1.10), "parent": "shoulder_R", "connect": False},
+    {"name": "forearm_R",  "head": (-0.23, 0, 1.10), "tail": (-0.23, 0, 0.83), "parent": "upperarm_R", "connect": True},
+    {"name": "hand_R",     "head": (-0.23, 0, 0.83), "tail": (-0.23, 0, 0.68), "parent": "forearm_R",  "connect": True},
+    {"name": "thigh_L",    "head": (0.1, 0, 0.90), "tail": (0.1, 0, 0.54), "parent": "pelvis",  "connect": False},
+    {"name": "shin_L",     "head": (0.1, 0, 0.54), "tail": (0.1, 0, 0.22), "parent": "thigh_L", "connect": True},
+    {"name": "foot_L",     "head": (0.1, 0, 0.22), "tail": (0.1, -0.18, 0.04), "parent": "shin_L", "connect": True},
+    {"name": "thigh_R",    "head": (-0.1, 0, 0.90), "tail": (-0.1, 0, 0.54), "parent": "pelvis",  "connect": False},
+    {"name": "shin_R",     "head": (-0.1, 0, 0.54), "tail": (-0.1, 0, 0.22), "parent": "thigh_R", "connect": True},
+    {"name": "foot_R",     "head": (-0.1, 0, 0.22), "tail": (-0.1, -0.18, 0.04), "parent": "shin_R", "connect": True},
+]
+
+
+@handler("POST", "/armature/create_biped")
+def armature_create_biped(body: dict[str, Any]) -> dict[str, Any]:
+    """Create a full humanoid skeleton in one call (S6-13).
+
+    19 bones: pelvis→spine→chest→neck→head, shoulder/upperarm/forearm/hand
+    (L/R), thigh/shin/foot (L/R). Coordinates scale with `height` (default 1.8 m).
+
+    Body: {name?: str (default 'Rig'), height?: float, location?: [x,y,z]}
+    """
+    import bpy  # type: ignore
+    from mathutils import Vector  # type: ignore
+
+    name = body.get("name", "Rig")
+    height = float(body.get("height", 1.8))
+    s = height / 1.8
+    location = tuple(body.get("location", (0.0, 0.0, 0.0)))
+
+    created: list[str] = []
+    with composite_undo(f"armature_create_biped:{name}"):
+        arm_data = bpy.data.armatures.new(name=f"{name}_data")
+        arm_obj = bpy.data.objects.new(name=name, object_data=arm_data)
+        arm_obj.location = location
+        bpy.context.scene.collection.objects.link(arm_obj)
+        set_active_and_selected(arm_obj)
+        with with_mode(arm_obj, "EDIT"):
+            eb = arm_data.edit_bones
+            for spec in _BIPED_BONES:
+                b = eb.new(name=spec["name"])
+                b.head = Vector(tuple(c * s for c in spec["head"]))
+                b.tail = Vector(tuple(c * s for c in spec["tail"]))
+                b.use_deform = True
+                created.append(spec["name"])
+            for spec in _BIPED_BONES:
+                if spec["parent"] and spec["parent"] in eb:
+                    eb[spec["name"]].parent = eb[spec["parent"]]
+                    eb[spec["name"]].use_connect = bool(spec["connect"])
+
+    return {
+        "ok": True,
+        "data": {
+            "armatureObjectName": arm_obj.name,
+            "armatureDataName": arm_data.name,
+            "height": height,
+            "boneCount": len(created),
+            "bones": created,
+        },
+        "refs": {"armatureName": arm_obj.name, "objectName": arm_obj.name, "boneNames": created},
+        "nextSteps": [
+            "skin a mesh: vertex groups named after bones + armature_parent_with_auto_weights (ARMATURE_NAME), or ARMATURE_AUTO",
+            "animate with pose_set + action_create",
+        ],
+    }
+
+
 _UE5_NAMING_FORBIDDEN_RE = re.compile(r"[A-Z]")
 _UE5_DOT_SUFFIX_RE = re.compile(r"\.(L|R)$")
 

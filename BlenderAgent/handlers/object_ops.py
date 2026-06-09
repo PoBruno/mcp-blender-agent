@@ -212,6 +212,77 @@ def object_set_transform(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+@handler("POST", "/object/apply_transform")
+def object_apply_transform(body: dict[str, Any]) -> dict[str, Any]:
+    """Bake object location/rotation/scale into the mesh data (S6-06).
+
+    Body: {objectName, location?: bool, rotation?: bool, scale?: bool (default scale only)}
+    Non-uniform object scale distorts width-based ops (Bevel/Solidify); apply
+    scale before those. Resets the applied channels to identity.
+    """
+    import bpy  # type: ignore
+    obj = get_object(body.get("objectName"))
+    do_loc = bool(body.get("location", False))
+    do_rot = bool(body.get("rotation", False))
+    do_scale = bool(body.get("scale", True))
+    with composite_undo(f"object_apply_transform:{obj.name}"):
+        set_active_and_selected(obj)
+        if obj.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+        with with_3dview_context():
+            bpy.ops.object.transform_apply(location=do_loc, rotation=do_rot, scale=do_scale)
+    return {
+        "ok": True,
+        "data": {
+            "objectName": obj.name,
+            "applied": {"location": do_loc, "rotation": do_rot, "scale": do_scale},
+            "scale": list(obj.scale),
+        },
+        "refs": {"objectName": obj.name},
+    }
+
+
+@handler("POST", "/object/set_mode")
+def object_set_mode(body: dict[str, Any]) -> dict[str, Any]:
+    """Switch an object into a mode (S6-07).
+
+    Body: {objectName, mode: OBJECT|EDIT|POSE|SCULPT|VERTEX_PAINT|WEIGHT_PAINT|TEXTURE_PAINT}
+    Use to recover from a stuck Sculpt/Edit mode that breaks operators.
+    """
+    import bpy  # type: ignore
+    obj = get_object(body.get("objectName"))
+    mode = body.get("mode")
+    if not mode:
+        raise InvalidInputError("mode is required")
+    with composite_undo(f"object_set_mode:{obj.name}/{mode}"):
+        set_active_and_selected(obj)
+        try:
+            bpy.ops.object.mode_set(mode=str(mode))
+        except (RuntimeError, TypeError) as exc:
+            raise InvalidInputError(f"cannot set mode {mode!r} on {obj.name!r}: {exc}") from exc
+    return {
+        "ok": True,
+        "data": {"objectName": obj.name, "mode": obj.mode},
+        "refs": {"objectName": obj.name},
+    }
+
+
+@handler("POST", "/object/rename")
+def object_rename(body: dict[str, Any]) -> dict[str, Any]:
+    """Rename an object (S6-10). Body: {objectName, newName}."""
+    obj = get_object(body.get("objectName"))
+    new_name = body.get("newName")
+    if not new_name:
+        raise InvalidInputError("newName is required")
+    with composite_undo(f"object_rename:{obj.name}->{new_name}"):
+        obj.name = str(new_name)
+    return {
+        "ok": True,
+        "data": {"objectName": obj.name, "requestedName": new_name},
+        "refs": {"objectName": obj.name},
+    }
+
+
 @handler("POST", "/object/duplicate_linked")
 def object_duplicate_linked(body: dict[str, Any]) -> dict[str, Any]:
     """Duplicate an object with linked (shared) data."""

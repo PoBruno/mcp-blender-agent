@@ -116,7 +116,7 @@ describe("composite pipeline endpoints (ARTIS support)", () => {
         textureCount: number;
         textures: Array<{ slot: string; colorspace: string }>;
       }>("/material/create_pbr_from_textures", {
-        materialName: "M_Test",
+        name: "M_Test",
         baseColor: base,
         roughness: rgh,
         metallic: met,
@@ -141,7 +141,7 @@ describe("composite pipeline endpoints (ARTIS support)", () => {
       const r = await blenderPost<{ materialName: string }>(
         "/material/create_pbr_from_textures",
         {
-          materialName: "M_DX",
+          name: "M_DX",
           normal: nrm,
           normalSpace: "DirectX",
         },

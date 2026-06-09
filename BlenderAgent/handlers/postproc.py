@@ -37,7 +37,7 @@ def _ensure_mesh(obj: Any) -> None:
 # voxel_remesh
 # ---------------------------------------------------------------------------
 
-@handler("POST", "/postproc/voxel_remesh")
+@handler("POST", "/postproc/voxel_remesh", timeout=300.0)
 def postproc_voxel_remesh(body: dict[str, Any]) -> dict[str, Any]:
     """Voxel-remesh an object to uniform topology. Heals intersections.
 
@@ -82,7 +82,7 @@ def postproc_voxel_remesh(body: dict[str, Any]) -> dict[str, Any]:
 # quad_remesh (QuadriFlow)
 # ---------------------------------------------------------------------------
 
-@handler("POST", "/postproc/quad_remesh")
+@handler("POST", "/postproc/quad_remesh", timeout=300.0)
 def postproc_quad_remesh(body: dict[str, Any]) -> dict[str, Any]:
     """Quad-remesh (QuadriFlow) for clean quad-dominant topology.
 
@@ -238,7 +238,7 @@ def postproc_decimate(body: dict[str, Any]) -> dict[str, Any]:
 # lod_generate
 # ---------------------------------------------------------------------------
 
-@handler("POST", "/postproc/lod_generate")
+@handler("POST", "/postproc/lod_generate", timeout=300.0)
 def postproc_lod_generate(body: dict[str, Any]) -> dict[str, Any]:
     """Generate N decimated LOD copies. Each copy is independent and named
     `<base>_LOD<i>`. The base object is preserved unchanged as LOD0.

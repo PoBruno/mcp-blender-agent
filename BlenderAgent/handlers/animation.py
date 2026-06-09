@@ -8,6 +8,7 @@ from ..helpers import (
     ActionNotFoundError,
     BoneNotFoundError,
     InvalidInputError,
+    coerce_value,
     composite_undo,
     get_action,
     get_armature_object,
@@ -25,16 +26,21 @@ def action_create(body: dict[str, Any]) -> dict[str, Any]:
     name = body.get("name")
     if not name:
         raise InvalidInputError("name is required")
+    # Fake user by default so a freshly created action (0 real users until it is
+    # assigned/pushed) is not purged on save/reload.
+    use_fake = bool(body.get("useFakeUser", True))
     with composite_undo(f"action_create:{name}"):
         if name in bpy.data.actions:
             act = bpy.data.actions[name]
+            act.use_fake_user = use_fake
             return {
                 "ok": True,
-                "data": {"actionName": act.name, "created": False},
+                "data": {"actionName": act.name, "created": False, "useFakeUser": act.use_fake_user},
                 "refs": {"actionName": act.name},
             }
         act = bpy.data.actions.new(name=name)
-    return {"ok": True, "data": {"actionName": act.name, "created": True},
+        act.use_fake_user = use_fake
+    return {"ok": True, "data": {"actionName": act.name, "created": True, "useFakeUser": act.use_fake_user},
             "refs": {"actionName": act.name}}
 
 
@@ -409,7 +415,19 @@ def keyframe_bone_pose(body: dict[str, Any]) -> dict[str, Any]:
     frame = body.get("frame")
     if not bone_name or frame is None:
         raise InvalidInputError("boneName and frame are required")
-    channels = body.get("channels") or ["location", "rotation_quaternion", "scale"]
+    channels = body.get("channels")
+    if not channels:
+        # Default channels must match the bone's actual rotation_mode, otherwise
+        # a pose set via euler gets keyed on the (unused) quaternion channel and
+        # the animation silently does nothing.
+        rot_channel = "rotation_quaternion"
+        pb = arm.pose.bones.get(bone_name) if arm.pose else None
+        mode = getattr(pb, "rotation_mode", "QUATERNION") if pb else "QUATERNION"
+        if mode == "AXIS_ANGLE":
+            rot_channel = "rotation_axis_angle"
+        elif mode != "QUATERNION":
+            rot_channel = "rotation_euler"
+        channels = ["location", rot_channel, "scale"]
 
     inserted: list[str] = []
     with composite_undo(f"keyframe_bone_pose:{arm.name}/{bone_name}@{frame}"):
@@ -432,6 +450,153 @@ def keyframe_bone_pose(body: dict[str, Any]) -> dict[str, Any]:
             "actionName": arm.animation_data.action.name
             if arm.animation_data and arm.animation_data.action else "",
         },
+    }
+
+
+@handler("POST", "/pose/set")
+def pose_set(body: dict[str, Any]) -> dict[str, Any]:
+    """Set (and optionally keyframe) many pose bones in one call (S6-11).
+
+    Body: {armatureObjectName, frame?: int,
+           pose: {boneName: {rotationEuler?: [x,y,z], rotationQuaternion?: [w,x,y,z],
+                             location?: [x,y,z], scale?: [x,y,z]}}}
+    If `frame` is given, each touched bone is keyframed on the channels it set
+    (rotation channel matches the rotation_mode actually used). Replaces dozens
+    of bone_set_pose_transform + keyframe_bone_pose calls.
+    """
+    arm = get_armature_object(body.get("armatureObjectName"))
+    poses = body.get("pose") or body.get("poses")
+    if not isinstance(poses, dict) or not poses:
+        raise InvalidInputError("pose must be a non-empty {boneName: {...}} dict")
+    frame = body.get("frame")
+    if arm.pose is None:
+        raise InvalidInputError(f"{arm.name!r} has no pose data")
+
+    touched: list[str] = []
+    with composite_undo(f"pose_set:{arm.name}@{frame}"):
+        for bname, t in poses.items():
+            pb = arm.pose.bones.get(bname)
+            if pb is None:
+                raise BoneNotFoundError(f"{arm.name!r} has no pose bone {bname!r}")
+            if not isinstance(t, dict):
+                raise InvalidInputError(f"pose[{bname!r}] must be an object")
+            if "location" in t:
+                pb.location = tuple(coerce_value(t["location"]))
+            if "scale" in t:
+                pb.scale = tuple(coerce_value(t["scale"]))
+            if "rotationEuler" in t:
+                pb.rotation_mode = "XYZ"
+                pb.rotation_euler = tuple(coerce_value(t["rotationEuler"]))
+                rot_channel = "rotation_euler"
+            elif "rotationQuaternion" in t:
+                pb.rotation_mode = "QUATERNION"
+                pb.rotation_quaternion = tuple(coerce_value(t["rotationQuaternion"]))
+                rot_channel = "rotation_quaternion"
+            else:
+                mode = pb.rotation_mode
+                rot_channel = ("rotation_quaternion" if mode == "QUATERNION"
+                               else "rotation_axis_angle" if mode == "AXIS_ANGLE"
+                               else "rotation_euler")
+            if frame is not None:
+                for ch in ("location", rot_channel, "scale"):
+                    arm.keyframe_insert(data_path=f'pose.bones["{bname}"].{ch}', frame=int(frame))
+            touched.append(bname)
+
+    return {
+        "ok": True,
+        "data": {
+            "armatureObjectName": arm.name,
+            "bonesSet": touched,
+            "frame": int(frame) if frame is not None else None,
+            "keyframed": frame is not None,
+        },
+        "refs": {"armatureName": arm.name},
+    }
+
+
+def _iter_fcurve_objects(act: Any) -> Any:
+    """Yield every FCurve object on an action across legacy and 4.4+ layered APIs.
+
+    Distinct from `_iter_fcurves` which yields (data_path, array_index, keyframe_count)
+    tuples. Use this when you need to mutate the FCurve directly (mirror, etc.).
+    """
+    fc = getattr(act, "fcurves", None)
+    try:
+        if fc is not None and len(fc) > 0:
+            yield from fc
+            return
+    except TypeError:
+        pass
+    for layer in getattr(act, "layers", []) or []:
+        for strip in getattr(layer, "strips", []):
+            for slot in getattr(act, "slots", []) or []:
+                cb = None
+                if hasattr(strip, "channelbag"):
+                    try:
+                        cb = strip.channelbag(slot)
+                    except Exception:  # noqa: BLE001
+                        cb = None
+                if cb is not None:
+                    yield from cb.fcurves
+
+
+def _swap_lr(s: str, left: str, right: str) -> str:
+    return s.replace(left, "\0").replace(right, left).replace("\0", right)
+
+
+def _mirror_fcurve_values(fc: Any) -> None:
+    """Negate the components that flip under an X-axis mirror."""
+    dp = fc.data_path
+    ai = fc.array_index
+    neg = (
+        (dp.endswith("location") and ai == 0)
+        or (dp.endswith("rotation_euler") and ai in (1, 2))
+        or (dp.endswith("rotation_quaternion") and ai in (2, 3))
+    )
+    if not neg:
+        return
+    for kp in fc.keyframe_points:
+        kp.co.y = -kp.co.y
+        kp.handle_left.y = -kp.handle_left.y
+        kp.handle_right.y = -kp.handle_right.y
+
+
+@handler("POST", "/action/mirror")
+def action_mirror(body: dict[str, Any]) -> dict[str, Any]:
+    """Create an X-mirrored copy of an action (S6-12).
+
+    Swaps left/right tokens in bone data-paths and negates the components that
+    flip under an X mirror (location.x, euler Y/Z, quaternion y/z). Best-effort:
+    assumes a standard humanoid named with `_L`/`_R` and an X-symmetric rest
+    pose. Body: {sourceActionName, newActionName, leftToken?: '_L', rightToken?: '_R'}.
+    """
+    src = get_action(body.get("sourceActionName"))
+    new_name = body.get("newActionName")
+    if not new_name:
+        raise InvalidInputError("newActionName is required")
+    left = body.get("leftToken", "_L")
+    right = body.get("rightToken", "_R")
+
+    with composite_undo(f"action_mirror:{src.name}->{new_name}"):
+        new_act = src.copy()
+        new_act.name = str(new_name)
+        new_act.use_fake_user = True
+        count = 0
+        for fc in _iter_fcurve_objects(new_act):
+            new_dp = _swap_lr(fc.data_path, left, right)
+            if new_dp != fc.data_path:
+                fc.data_path = new_dp
+            _mirror_fcurve_values(fc)
+            try:
+                fc.update()
+            except Exception:  # noqa: BLE001
+                pass
+            count += 1
+
+    return {
+        "ok": True,
+        "data": {"sourceActionName": src.name, "actionName": new_act.name, "fcurvesProcessed": count},
+        "refs": {"actionName": new_act.name},
     }
 
 
@@ -872,8 +1037,12 @@ def nla_push_action_to_strip(body: dict[str, Any]) -> dict[str, Any]:
 
     with composite_undo(f"nla_push_action_to_strip:{obj.name}"):
         act = obj.animation_data.action
-        track = obj.animation_data.nla_tracks.new()
-        track.name = track_name
+        # Reuse an existing track with this name (e.g. one created by
+        # nla_track_add) instead of spawning a duplicate empty track.
+        track = obj.animation_data.nla_tracks.get(track_name)
+        if track is None:
+            track = obj.animation_data.nla_tracks.new()
+            track.name = track_name
         track.strips.new(name=act.name, start=int(act.frame_range[0]), action=act)
         obj.animation_data.action = None
 

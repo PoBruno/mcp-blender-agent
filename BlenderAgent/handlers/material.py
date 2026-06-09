@@ -10,11 +10,68 @@ from typing import Any
 
 from ..helpers import (
     InvalidInputError,
+    coerce_value,
     composite_undo,
     get_material,
     get_object,
 )
 from ..server import handler
+
+
+def _principled_node(mat: Any) -> Any:
+    if not mat.use_nodes or mat.node_tree is None:
+        raise InvalidInputError(f"material {mat.name!r} has no node tree")
+    for n in mat.node_tree.nodes:
+        if n.bl_idname == "ShaderNodeBsdfPrincipled":
+            return n
+    raise InvalidInputError(f"material {mat.name!r} has no Principled BSDF node")
+
+
+def _set_socket(node: Any, names: list[str], value: Any) -> bool:
+    """Set the first input socket that matches any of `names` (version-tolerant)."""
+    for nm in names:
+        sock = node.inputs.get(nm)
+        if sock is not None:
+            try:
+                sock.default_value = coerce_value(value)
+                return True
+            except (TypeError, ValueError):
+                return False
+    return False
+
+
+@handler("POST", "/material/set_principled")
+def material_set_principled(body: dict[str, Any]) -> dict[str, Any]:
+    """Set common Principled BSDF inputs in one call (S6-09).
+
+    Body: {materialName, baseColor?: [r,g,b,a], roughness?, metallic?,
+           emissionColor?: [r,g,b,a], emissionStrength?, alpha?, ior?,
+           specular?}  — only provided keys are applied. Socket names are
+    resolved version-tolerantly (4.x/5.x).
+    """
+    mat = get_material(body.get("materialName"))
+    node = _principled_node(mat)
+    applied: list[str] = []
+    spec = [
+        ("baseColor", ["Base Color"]),
+        ("roughness", ["Roughness"]),
+        ("metallic", ["Metallic"]),
+        ("emissionColor", ["Emission Color", "Emission"]),
+        ("emissionStrength", ["Emission Strength"]),
+        ("alpha", ["Alpha"]),
+        ("ior", ["IOR"]),
+        ("specular", ["Specular IOR Level", "Specular"]),
+    ]
+    with composite_undo(f"material_set_principled:{mat.name}"):
+        for key, sockets in spec:
+            if key in body and body[key] is not None:
+                if _set_socket(node, sockets, body[key]):
+                    applied.append(key)
+    return {
+        "ok": True,
+        "data": {"materialName": mat.name, "applied": applied},
+        "refs": {"materialName": mat.name},
+    }
 
 
 @handler("POST", "/material/create")

@@ -69,6 +69,15 @@ def shader_node_set_input_value(body: dict[str, Any]) -> dict[str, Any]:
     value = body.get("value")
     if not node_name or socket is None or value is None:
         raise InvalidInputError("nodeName, socketName and value are required")
+    # Some MCP clients stringify untyped (z.unknown) values — a color arrives as
+    # "[0.85, 0.02, 0.02, 1.0]" and a float as "0.16". Recover JSON scalars and
+    # sequences so numeric/color/vector sockets accept them.
+    if isinstance(value, str):
+        import json
+        try:
+            value = json.loads(value)
+        except (ValueError, TypeError):
+            pass
     node = tree.nodes.get(node_name)
     if node is None:
         raise NodeNotFoundError(f"node {node_name!r} not found")

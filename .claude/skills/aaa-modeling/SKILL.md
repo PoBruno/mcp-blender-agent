@@ -35,6 +35,18 @@ flowchart TD
 
 ---
 
+## Phase 0 — Make sure Blender is open (do this first, always)
+
+Before any modeling tool call, call **`blender_launch`**. It reuses an already-open Blender if one is reachable, or launches a GUI Blender from the default install path otherwise. This guarantees:
+
+- tool calls don't fail with `BLENDER_UNREACHABLE`,
+- `vision_snapshot` gets the fast viewport path (instant) instead of falling back to a render,
+- the user can watch the work happen in a real window.
+
+If you ever need to recover a wedged session, `blender_quit` then `blender_launch`. `addon_restart` reloads addon code without quitting.
+
+---
+
 ## Phase 1 — Brief & references (always, no exceptions)
 
 Before any tool call, write a one-paragraph brief:
@@ -116,24 +128,35 @@ If you find yourself doing more than ~10 primitive calls for a single "asset", S
 
 ---
 
-## Phase 4 — Render contact sheet (the AlphaFold loop step 1)
+## Phase 4 — Look at what you built (the AlphaFold loop step 1)
 
-After ANY model creation, render a **contact sheet** before doing anything else:
+After ANY model change, **look at it before doing anything else.** Two tiers — don't confuse them:
+
+**Inner loop (every iteration) → `vision_snapshot`.** One fast PNG. On a GUI Blender it's an instant viewport screenshot; in background it falls back to a single ~16-sample EEVEE render. Sub-second either way. This is what you call dozens of times while refining.
 
 ```text
-/vision/contact_sheet
+vision_snapshot
   objectNames=["Chair_Frame", "Chair_Seat", "Chair_Back"]
-  angles=["front", "side", "back", "three_quarter"]
-  resolution=512
+  angle="three_quarter"
   outputPath="<workspace>/scripts/_out/critique/<asset>_iter_<N>.png"
 ```
 
-The output is a single PNG with 4 thumbnails arranged 2×2. **You then look at the image.** This is the recycling step from AlphaFold — without visual feedback you are blind.
+**Final gate (once, when the silhouette is approved) → `vision_contact_sheet`.** 4 angles in a 2×2 grid, for the all-sides sign-off before post-processing/export.
+
+```text
+vision_contact_sheet
+  objectNames=[...]
+  angles=["front","side","back","three_quarter"]
+  resolution=512        # samples default 16, engine default EEVEE — both fast
+  outputPath=".../contact_<asset>.png"
+```
+
+Never run a full Cycles beauty render inside the refine loop — it blocks the single Blender main thread for tens of seconds per frame and stalls everything behind it. Keep critique renders on EEVEE + low samples (the defaults). Cycles is for the final hero shot only.
 
 Also useful:
-- `/vision/turntable` — N renders rotating 360°, saved as separate PNGs (good for animation review).
-- `/vision/topology_inspect` — quad/tri/ngon counts, manifold/non-manifold edges, normal consistency, bounding box.
-- `/vision/scale_report` — compares object dims against the spec.
+- `vision_turntable` — N renders rotating 360° (animation review). Heavy; use sparingly.
+- `vision_topology_inspect` — quad/tri/ngon counts, manifold/non-manifold edges, normal consistency, bounding box.
+- `vision_scale_report` — compares object dims against the spec.
 
 ---
 

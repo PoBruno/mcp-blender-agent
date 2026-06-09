@@ -69,7 +69,7 @@ def bake_setup_target_image(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@handler("POST", "/bake/run")
+@handler("POST", "/bake/run", timeout=900.0)
 def bake_run(body: dict[str, Any]) -> dict[str, Any]:
     """Run `bpy.ops.object.bake` with full parameter passthrough.
 

@@ -19,6 +19,23 @@ export function registerMaterialTools(server: McpServer): void {
       handler: passthroughPost("/material/create"),
     },
     {
+      name: "material_set_principled",
+      description:
+        "Set common Principled BSDF inputs in one call (base color, roughness, metallic, emission, alpha, IOR, specular). Only provided keys are applied; socket names resolved version-tolerantly. Use after material_create instead of multiple shader_node_set_input_value calls.",
+      inputSchema: {
+        materialName: z.string().describe("Material (must have a Principled BSDF)."),
+        baseColor: z.array(z.number()).optional().describe("[r,g,b,a] linear, 0..1."),
+        roughness: z.number().min(0).max(1).optional().describe("0=mirror, 1=matte."),
+        metallic: z.number().min(0).max(1).optional().describe("0=dielectric, 1=metal."),
+        emissionColor: z.array(z.number()).optional().describe("[r,g,b,a] emission color."),
+        emissionStrength: z.number().min(0).optional().describe("Emission strength."),
+        alpha: z.number().min(0).max(1).optional().describe("Opacity."),
+        ior: z.number().min(0).optional().describe("Index of refraction."),
+        specular: z.number().min(0).max(1).optional().describe("Specular IOR level."),
+      },
+      handler: passthroughPost("/material/set_principled"),
+    },
+    {
       name: "material_delete",
       description: "Delete a material datablock.",
       inputSchema: { materialName: z.string().describe("Material to delete.") },
@@ -109,7 +126,9 @@ export function registerShaderNodeTools(server: McpServer): void {
         nodeGroupName: z.string().optional().describe("Node group tree."),
         nodeName: z.string().describe("Target node name."),
         socketName: z.union([z.string(), z.number().int()]).describe("Socket name or index."),
-        value: z.unknown().describe("New value (scalar, color [r,g,b,a], or vector)."),
+        value: z
+          .union([z.number(), z.boolean(), z.string(), z.array(z.number())])
+          .describe("New value (scalar, color [r,g,b,a], or vector)."),
       },
       handler: passthroughPost("/shader_node/set_input_value"),
     },

@@ -6,6 +6,24 @@ Sister project to [PoBruno/mcp-unreal-agent](https://github.com/PoBruno/mcp-unre
 
 ---
 
+## ⚡ Install in one prompt
+
+Paste this into your agent chat (Claude Code, Copilot, Cursor, Claude Desktop). It detects your setup, installs everything, wires your harness, and verifies end-to-end:
+
+```
+Install the @pobruno/blender-agent MCP for me by following install/AGENT-INSTALL.md in this repo:
+1. Detect my OS, Blender (require 4.2 LTS+, 5.x preferred), and Node (>=18).
+2. Install the BlenderAgent addon into Blender and enable it (port 9877, coexists with blender-mcp on 9876).
+3. Install the MCP server and wire it into my agent harness (detect Claude Code / Copilot / Cursor / Claude Desktop), merging config — never overwriting.
+4. Install the passive context skill from install/context-skill/ so the chat always knows it controls Blender.
+5. Restart the harness if config changed, then verify by calling blender_launch and server_status and report the Blender version.
+Show me a plan and ask before mutating anything.
+```
+
+After install, the agent reads [`install/context-skill/SKILL.md`](install/context-skill/SKILL.md) on every 3D request — so it always knows it drives Blender, launches first, and runs the see-and-refine loop. More copy-paste workflows: [install/PROMPT-TEMPLATES.md](install/PROMPT-TEMPLATES.md).
+
+---
+
 ## Why this exists
 
 The Blender MCP space today is dominated by **creative toys**: "make a dungeon scene", "apply a red metallic material". Those exist (see [ahujasid/blender-mcp](https://github.com/ahujasid/blender-mcp), 22k+ stars) and they're great for ideation.

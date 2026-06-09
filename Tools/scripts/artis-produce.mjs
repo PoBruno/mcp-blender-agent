@@ -698,8 +698,19 @@ async function main() {
     }
     const outPath = join(dst, `${targetActionName}.fbx`);
 
-    // Assign + export
-    await step(`export ${targetActionName} → ${basename(dst)}/`,
+    // Assign + export.
+    //
+    // CRITICAL — scene.frame_start/frame_end leak across the production run
+    // (the AimOffset §7 bake and the §11c BS2D cell exports both narrow the
+    // scene to a single frame). With useNlaStrips=false + useAllActions=false
+    // the FBX baker reads scene.frame_start..frame_end as the bake range, so
+    // we MUST pin it back to the action's own frame_range or every locomotion
+    // clip gets silently truncated to ~9 frames. The action's range came back
+    // from /action/inspect (x.frameStart / x.frameEnd). Round outward to keep
+    // any sub-frame keys.
+    const fStart = Math.floor(x.frameStart);
+    const fEnd   = Math.ceil(x.frameEnd);
+    await step(`export ${targetActionName} → ${basename(dst)}/ [${fStart}..${fEnd}]`,
       async () => {
         const assign = await blenderPost("/action/assign_to_object", {
           objectName: armName, actionName: targetActionName,
@@ -714,10 +725,17 @@ async function main() {
           useArmatureDeformOnly: false,
           useCustomProps: true,
           useNlaStrips: false,
+          frameStart: fStart, frameEnd: fEnd,
           primaryBoneAxis: "Y", secondaryBoneAxis: "X",
         });
         if (exp.ok && existsSync(outPath)) {
-          log(`> ${basename(outPath)} — ${(statSync(outPath).size / 1024).toFixed(1)} KB (${x.frameCount}f, ${x.bones.length} bones)`);
+          const baked = exp.data?.bakedFrameCount ?? x.frameCount;
+          const fs = exp.data?.bakedFrameStart ?? fStart;
+          const fe = exp.data?.bakedFrameEnd   ?? fEnd;
+          log(`> ${basename(outPath)} — ${(statSync(outPath).size / 1024).toFixed(1)} KB (baked ${baked}f [${fs}..${fe}], ${x.bones.length} bones)`);
+          if (baked < 12) {
+            log(`> ⚠ baked range is suspiciously short (${baked}f) — verify the action keyframes`);
+          }
         }
         return exp;
       });

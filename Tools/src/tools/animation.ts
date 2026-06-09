@@ -11,9 +11,45 @@ export function registerAnimationTools(server: McpServer): void {
   registerTools(server, [
     {
       name: "action_create",
-      description: "Create (or reuse) an Action datablock.",
-      inputSchema: { name: z.string().describe("Action name.") },
+      description: "Create (or reuse) an Action datablock. Fake-user is set by default so the action survives save/reload before it is assigned or pushed to NLA.",
+      inputSchema: {
+        name: z.string().describe("Action name."),
+        useFakeUser: z.boolean().optional().describe("Keep the action even with 0 users (default true)."),
+      },
       handler: passthroughPost("/action/create"),
+    },
+    {
+      name: "pose_set",
+      description:
+        "Set (and optionally keyframe) MANY pose bones in one call. Replaces dozens of bone_set_pose_transform + keyframe_bone_pose calls. If `frame` is given, each touched bone is keyframed on the channel matching the rotation it set (euler vs quaternion).",
+      inputSchema: {
+        armatureObjectName: z.string().describe("Armature object."),
+        frame: z.number().int().optional().describe("If set, keyframe every touched bone at this frame."),
+        pose: z
+          .record(
+            z.string(),
+            z.object({
+              rotationEuler: z.array(z.number()).optional().describe("[x,y,z] radians (sets XYZ mode)."),
+              rotationQuaternion: z.array(z.number()).optional().describe("[w,x,y,z]."),
+              location: z.array(z.number()).optional().describe("[x,y,z] pose translation."),
+              scale: z.array(z.number()).optional().describe("[x,y,z] pose scale."),
+            }),
+          )
+          .describe("Map of bone name → transform to apply."),
+      },
+      handler: passthroughPost("/pose/set"),
+    },
+    {
+      name: "action_mirror",
+      description:
+        "Create an X-mirrored copy of an action (swaps _L/_R bone channels, negates location.x and euler Y/Z / quaternion y/z). Use to generate the opposite-side keys of a symmetric cycle (e.g. the second contact of a walk). Best-effort: assumes humanoid _L/_R naming and an X-symmetric rest pose.",
+      inputSchema: {
+        sourceActionName: z.string().describe("Action to mirror."),
+        newActionName: z.string().describe("Name for the mirrored copy."),
+        leftToken: z.string().optional().describe("Left-side token in bone names (default '_L')."),
+        rightToken: z.string().optional().describe("Right-side token (default '_R')."),
+      },
+      handler: passthroughPost("/action/mirror"),
     },
     {
       name: "action_assign_to_object",

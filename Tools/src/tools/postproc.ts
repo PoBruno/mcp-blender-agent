@@ -23,7 +23,7 @@ export function registerPostprocTools(server: McpServer): void {
         adaptivity: z.number().min(0).max(1).optional().describe("0..1, default 0."),
         useSmoothShade: z.boolean().optional().describe("Smooth normals. Default true."),
       },
-      handler: passthroughPost("/postproc/voxel_remesh"),
+      handler: passthroughPost("/postproc/voxel_remesh", { timeoutMs: 300_000 }),
     },
     {
       name: "postproc_quad_remesh",
@@ -38,7 +38,7 @@ export function registerPostprocTools(server: McpServer): void {
         useSharpEdges: z.boolean().optional().describe("Preserve sharp edges. Default true."),
         useSmoothNormals: z.boolean().optional().describe("Smooth normals on output. Default true."),
       },
-      handler: passthroughPost("/postproc/quad_remesh"),
+      handler: passthroughPost("/postproc/quad_remesh", { timeoutMs: 300_000 }),
     },
     {
       name: "postproc_smart_uv_project",
@@ -82,7 +82,7 @@ export function registerPostprocTools(server: McpServer): void {
           "Per-level collapse ratios. Default [0.5,0.25,0.10]. Length must equal levels.",
         ),
       },
-      handler: passthroughPost("/postproc/lod_generate"),
+      handler: passthroughPost("/postproc/lod_generate", { timeoutMs: 300_000 }),
     },
     {
       name: "postproc_auto_smooth_normals",

@@ -50,7 +50,7 @@ export function registerBakeTools(server: McpServer): void {
         marginType: z.enum(["EXTEND", "ADJACENT_FACES"]).optional().describe("Margin algorithm."),
         useClear: z.boolean().optional().describe("Clear image before bake (default true)."),
       },
-      handler: passthroughPost("/bake/run"),
+      handler: passthroughPost("/bake/run", { timeoutMs: 900_000 }),
     },
     {
       name: "image_save_as",

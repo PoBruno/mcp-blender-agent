@@ -7,6 +7,7 @@ from typing import Any
 from ..helpers import (
     InvalidInputError,
     ModifierNotFoundError,
+    coerce_value,
     composite_undo,
     get_object,
     set_active_and_selected,
@@ -38,7 +39,7 @@ def modifier_add(body: dict[str, Any]) -> dict[str, Any]:
             raise InvalidInputError(f"Failed to add modifier {mod_type!r} to {obj.name!r}")
         for k, v in params.items():
             if hasattr(mod, k):
-                setattr(mod, k, v)
+                setattr(mod, k, coerce_value(v))
 
     return {
         "ok": True,
@@ -61,7 +62,7 @@ def modifier_set_property(body: dict[str, Any]) -> dict[str, Any]:
         for k, v in props.items():
             if not hasattr(mod, k):
                 raise InvalidInputError(f"Modifier {mod.type!r} has no property {k!r}")
-            setattr(mod, k, v)
+            setattr(mod, k, coerce_value(v))
     return {
         "ok": True,
         "data": {"objectName": obj.name, "modifierName": mod.name, "updated": list(props.keys())},

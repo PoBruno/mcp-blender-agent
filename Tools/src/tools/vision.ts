@@ -14,9 +14,37 @@ import { passthroughPost, registerTools } from "../tool-helpers.js";
 export function registerVisionTools(server: McpServer): void {
   registerTools(server, [
     {
+      name: "vision_snapshot",
+      description:
+        "Fast single PNG of the current state — the feedback tool for the inner refine loop. Prefers an instant viewport screenshot (GUI Blender) and falls back to one fast EEVEE render in background mode. Frames the target objects. Call this each iteration; reserve vision_contact_sheet / full renders for the final beauty gate.",
+      inputSchema: {
+        outputPath: z.string().describe("Absolute path for the PNG (parent dir auto-created)."),
+        objectNames: z.array(z.string()).optional().describe(
+          "Objects to frame. Omit ⇒ all visible render objects.",
+        ),
+        angle: z.string().optional().describe(
+          "Viewing angle. Default 'three_quarter'. Valid: front, back, left, right (alias side), top, bottom, three_quarter, three_quarter_back.",
+        ),
+        resolution: z.number().int().min(64).max(4096).optional().describe(
+          "Fallback-render square resolution (px). Default 512. Ignored on the viewport path.",
+        ),
+        samples: z.number().int().min(1).max(4096).optional().describe(
+          "Fallback-render samples. Default 16 (fast preview).",
+        ),
+        shading: z.string().optional().describe(
+          "Viewport shading on the GUI path: SOLID, MATERIAL (default), RENDERED, WIREFRAME.",
+        ),
+        forceRender: z.boolean().optional().describe(
+          "Skip the viewport path and always render. Default false.",
+        ),
+        sceneName: z.string().optional().describe("Scene name. Default active."),
+      },
+      handler: passthroughPost("/vision/snapshot", { timeoutMs: 120_000 }),
+    },
+    {
       name: "vision_contact_sheet",
       description:
-        "Render N angles of the targets and compose a single PNG grid. Output path is the assembled sheet. Use this AFTER any model build to self-critique against the brief on the 6-axis rubric (silhouette/proportions/topology/material/lighting/reference).",
+        "Render N angles of the targets and compose a single PNG grid. Output path is the assembled sheet. Use this for the final multi-angle gate; for the inner refine loop prefer vision_snapshot (faster). Self-critique against the brief on the 6-axis rubric (silhouette/proportions/topology/material/lighting/reference).",
       inputSchema: {
         outputPath: z.string().describe("Absolute path for the assembled PNG (parent dir auto-created)."),
         objectNames: z.array(z.string()).optional().describe(
@@ -34,12 +62,15 @@ export function registerVisionTools(server: McpServer): void {
         keepTiles: z.boolean().optional().describe(
           "Keep individual tile PNGs next to the grid. Default false.",
         ),
+        samples: z.number().int().min(1).max(4096).optional().describe(
+          "Render samples. Default 16 (fast preview).",
+        ),
         engine: z.string().optional().describe(
-          "Optional render engine override (BLENDER_EEVEE, BLENDER_EEVEE_NEXT, CYCLES).",
+          "Optional render engine override. Default EEVEE for speed (BLENDER_EEVEE, BLENDER_EEVEE_NEXT, CYCLES).",
         ),
         sceneName: z.string().optional().describe("Scene to render. Default active."),
       },
-      handler: passthroughPost("/vision/contact_sheet"),
+      handler: passthroughPost("/vision/contact_sheet", { timeoutMs: 300_000 }),
     },
     {
       name: "vision_turntable",
@@ -52,11 +83,12 @@ export function registerVisionTools(server: McpServer): void {
         elevation: z.number().optional().describe("Camera elevation in degrees. Default 12."),
         resolution: z.number().int().min(64).max(4096).optional().describe("Square px. Default 512."),
         padding: z.number().positive().optional().describe("Framing padding. Default 1.4."),
+        samples: z.number().int().min(1).max(4096).optional().describe("Render samples. Default 16."),
         filenamePrefix: z.string().optional().describe("Filename prefix. Default 'turntable_'."),
-        engine: z.string().optional().describe("Render engine override."),
+        engine: z.string().optional().describe("Render engine override. Default EEVEE for speed."),
         sceneName: z.string().optional().describe("Scene name."),
       },
-      handler: passthroughPost("/vision/turntable"),
+      handler: passthroughPost("/vision/turntable", { timeoutMs: 600_000 }),
     },
     {
       name: "vision_topology_inspect",
@@ -97,6 +129,45 @@ export function registerVisionTools(server: McpServer): void {
         outputPath: z.string().describe("Absolute path for the PNG."),
       },
       handler: passthroughPost("/vision/screenshot_viewport"),
+    },
+    {
+      name: "vision_render_action",
+      description:
+        "Render an action's frames from a fixed angle and assemble a horizontal strip PNG — so you can SEE the motion (walk/idle/etc) in one image. Optionally assigns the action first. Use this to review an animation instead of guessing from keyframes.",
+      inputSchema: {
+        outputDir: z.string().describe("Directory for the frame PNGs + strip (auto-created)."),
+        frameStart: z.number().int().describe("First frame."),
+        frameEnd: z.number().int().describe("Last frame."),
+        step: z.number().int().min(1).optional().describe("Frame step. Default 2."),
+        objectNames: z.array(z.string()).optional().describe("Framed targets. Omit ⇒ all visible."),
+        armatureObjectName: z.string().optional().describe("Armature to assign the action to (with actionName)."),
+        actionName: z.string().optional().describe("Action to assign before rendering."),
+        angle: z.string().optional().describe("Camera angle. Default 'three_quarter' (use 'left'/'right' for walk profiles)."),
+        resolution: z.number().int().min(64).max(4096).optional().describe("Per-frame square px. Default 384."),
+        samples: z.number().int().min(1).max(4096).optional().describe("Render samples. Default 16."),
+        engine: z.string().optional().describe("Render engine override. Default EEVEE."),
+        filenamePrefix: z.string().optional().describe("Frame filename prefix. Default 'action_'."),
+        makeStrip: z.boolean().optional().describe("Assemble a horizontal strip PNG. Default true."),
+        sceneName: z.string().optional().describe("Scene name."),
+      },
+      handler: passthroughPost("/vision/render_action", { timeoutMs: 900_000 }),
+    },
+    {
+      name: "vision_silhouette_compare",
+      description:
+        "Render the model's silhouette and score it against a reference image: returns IoU + a diff heatmap (green=overlap, red=excess to trim, blue=missing to add). A pLDDT-style structural-confidence signal to drive the refine loop. Reference should be an alpha-matte or clean-background image.",
+      inputSchema: {
+        referenceImage: z.string().describe("Path to the reference image (alpha matte or clean bg)."),
+        outputPath: z.string().describe("Path for the diff heatmap PNG."),
+        objectNames: z.array(z.string()).optional().describe("Targets. Omit ⇒ all visible."),
+        angle: z.string().optional().describe("Camera angle. Default 'front'."),
+        resolution: z.number().int().min(64).max(2048).optional().describe("Square px. Default 256."),
+        threshold: z.number().min(0).max(1).optional().describe("Alpha/silhouette threshold. Default 0.5."),
+        samples: z.number().int().min(1).max(256).optional().describe("Render samples. Default 8."),
+        engine: z.string().optional().describe("Render engine override."),
+        sceneName: z.string().optional().describe("Scene name."),
+      },
+      handler: passthroughPost("/vision/silhouette_compare", { timeoutMs: 300_000 }),
     },
   ]);
 }

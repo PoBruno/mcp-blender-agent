@@ -10,6 +10,7 @@ This module is the central place for:
 
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import contextmanager
 from typing import Any, Callable, Iterator, Optional, TypeVar
@@ -17,6 +18,39 @@ from typing import Any, Callable, Iterator, Optional, TypeVar
 logger = logging.getLogger("BlenderAgent.helpers")
 
 T = TypeVar("T")
+
+
+# ----------------------------------------------------------------------------
+# Value coercion — recover stringified JSON from clients
+# ----------------------------------------------------------------------------
+
+def coerce_value(v: Any) -> Any:
+    """Recover a JSON scalar/sequence from a value that arrived as a string.
+
+    Some MCP clients serialise untyped fields (Zod `z.unknown()` /
+    `z.record(z.unknown())`) as strings, so a color arrives as
+    ``"[0.8, 0.0, 0.0, 1.0]"`` and a float as ``"0.16"``. Sockets and RNA
+    properties reject those. Parse when the string clearly looks like JSON;
+    leave genuine string values (enum tokens like ``"REPEAT"``, names) intact.
+    """
+    if not isinstance(v, str):
+        return v
+    s = v.strip()
+    if not s:
+        return v
+    if s[0] in "[{-" or s[0].isdigit() or s in ("true", "false", "null"):
+        try:
+            return json.loads(s)
+        except (ValueError, TypeError):
+            return v
+    return v
+
+
+def coerce_params(d: Any) -> Any:
+    """Apply :func:`coerce_value` to every value in a params/properties dict."""
+    if not isinstance(d, dict):
+        return d
+    return {k: coerce_value(v) for k, v in d.items()}
 
 
 # ----------------------------------------------------------------------------

@@ -152,6 +152,19 @@ export function registerRenderTools(server: McpServer): void {
       handler: passthroughPost("/render/set_engine"),
     },
     {
+      name: "render_set_view_transform",
+      description:
+        "Set scene color management. Blender defaults to AgX which desaturates — set viewTransform 'Standard' for vivid, reference-true color in renders/snapshots.",
+      inputSchema: {
+        sceneName: z.string().optional().describe("Scene; default = active."),
+        viewTransform: z.string().optional().describe("'Standard' | 'AgX' | 'Filmic' | engine-specific."),
+        look: z.string().optional().describe("Contrast look (e.g. 'AgX - Punchy', 'None')."),
+        exposure: z.number().optional().describe("Stops of exposure."),
+        gamma: z.number().optional().describe("Gamma."),
+      },
+      handler: passthroughPost("/render/set_view_transform"),
+    },
+    {
       name: "render_set_resolution",
       description: "Set render resolution and percentage.",
       inputSchema: {
@@ -173,7 +186,7 @@ export function registerRenderTools(server: McpServer): void {
           .optional()
           .describe("File format (default PNG)."),
       },
-      handler: passthroughPost("/render/render_still"),
+      handler: passthroughPost("/render/render_still", { timeoutMs: 300_000 }),
     },
     {
       name: "render_render_animation",
@@ -186,7 +199,7 @@ export function registerRenderTools(server: McpServer): void {
           .optional()
           .describe("File format (default PNG)."),
       },
-      handler: passthroughPost("/render/render_animation"),
+      handler: passthroughPost("/render/render_animation", { timeoutMs: 900_000 }),
     },
     {
       name: "render_set_output",
