@@ -8,19 +8,62 @@ Sister project to [PoBruno/mcp-unreal-agent](https://github.com/PoBruno/mcp-unre
 
 ## ⚡ Install in one prompt
 
-Paste this into your agent chat (Claude Code, Copilot, Cursor, Claude Desktop). It detects your setup, installs everything, wires your harness, and verifies end-to-end:
+Open your project in your editor, then paste the matching prompt into your agent chat. No `npm publish`, no global install — the agent clones this repo into `.mcp/blender-agent/` inside your workspace and wires everything up. Prereqs: **Blender 4.2 LTS+ (5.x recommended)**, **Node 18+**, **git**.
+
+### Claude Code
 
 ```
-Install the @pobruno/blender-agent MCP for me by following install/AGENT-INSTALL.md in this repo:
-1. Detect my OS, Blender (require 4.2 LTS+, 5.x preferred), and Node (>=18).
-2. Install the BlenderAgent addon into Blender and enable it (port 9877, coexists with blender-mcp on 9876).
-3. Install the MCP server and wire it into my agent harness (detect Claude Code / Copilot / Cursor / Claude Desktop), merging config — never overwriting.
-4. Install the passive context skill from install/context-skill/ so the chat always knows it controls Blender.
-5. Restart the harness if config changed, then verify by calling blender_launch and server_status and report the Blender version.
-Show me a plan and ask before mutating anything.
+Install https://github.com/PoBruno/mcp-blender-agent into this workspace.
+Follow install/AGENT-INSTALL.md from that repo end to end. Clone into
+.mcp/blender-agent, build the TS server, package the addon zip, merge MCP
+config into .mcp.json, inject the passive context skill into
+.claude/skills/blender-agent/ and reference it via a delimited managed block
+in CLAUDE.md. Use AskUserQuestion before anything destructive. Tell me the
+exact path to BlenderAgent.zip so I can install it in Blender's Add-ons UI.
 ```
 
-After install, the agent reads [`install/context-skill/SKILL.md`](install/context-skill/SKILL.md) on every 3D request — so it always knows it drives Blender, launches first, and runs the see-and-refine loop. More copy-paste workflows: [install/PROMPT-TEMPLATES.md](install/PROMPT-TEMPLATES.md).
+### GitHub Copilot (VS Code)
+
+```
+Install https://github.com/PoBruno/mcp-blender-agent into this workspace.
+Read install/AGENT-INSTALL.md from that repo and run every phase. Clone into
+.mcp/blender-agent, build the TS server, package the addon zip, write the
+MCP config to .vscode/mcp.json, inject the passive context skill into
+.github/instructions/blender-agent/ and reference it via a delimited managed
+block in .github/copilot-instructions.md. Use AskUserQuestion before anything
+destructive. Tell me the exact path to BlenderAgent.zip so I can install it
+in Blender's Add-ons UI.
+```
+
+### Cursor
+
+```
+Install https://github.com/PoBruno/mcp-blender-agent into this workspace.
+Follow install/AGENT-INSTALL.md from that repo end to end. Clone into
+.mcp/blender-agent, build the TS server, package the addon zip, merge MCP
+config into .mcp.json, inject the passive context skill into ./blender-agent/
+and reference it via a delimited managed block in AGENTS.md. Ask before
+anything destructive. Tell me the exact path to BlenderAgent.zip so I can
+install it in Blender's Add-ons UI.
+```
+
+### Claude Desktop
+
+```
+Install https://github.com/PoBruno/mcp-blender-agent into the folder I'll
+tell you. Follow install/AGENT-INSTALL.md from that repo end to end. Clone
+into <FOLDER>/.mcp/blender-agent, build the TS server, package the addon zip,
+add the MCP entry to %APPDATA%\Claude\claude_desktop_config.json with
+absolute paths, and tell me when I need to restart Claude Desktop. Ask before
+anything destructive. Tell me the exact path to BlenderAgent.zip so I can
+install it in Blender's Add-ons UI.
+
+Workspace folder: <PASTE ABSOLUTE PATH HERE>
+```
+
+One manual step you'll do yourself: install `BlenderAgent.zip` via Blender → Edit → Preferences → Add-ons → Install... (the agent can't reach into a separate Blender process to enable a plugin).
+
+After install, the agent reads [`install/context-skill/SKILL.md`](install/context-skill/SKILL.md) on every 3D request — so it always knows it drives Blender, launches first, and runs the see-and-refine loop. Manual install reference: [install/INSTALL.md](install/INSTALL.md). More copy-paste workflow prompts: [install/PROMPT-TEMPLATES.md](install/PROMPT-TEMPLATES.md).
 
 ---
 
@@ -57,11 +100,11 @@ Two serving modes:
 
 ## Status
 
-**Sprints 0–5 scaffold landed and validated on Blender 5.1.2.** Addon (35 handler modules), TS server (16 tool files, ~140 tools), 12 tool integration tests (39 cases) + 3 recipe tests (03 metahuman face, 04 modular kit, 08 animation bake-export) — **all 42 tests passing on real Blender 5.1.2** (Steam install, port 9877 coexisting with ahujasid `blender-mcp` on 9876). Install harness in place; CI matrix runs build + both suites on ubuntu / windows / macos against Blender 4.2 LTS. See [.claude/docs/SPRINTS.md](.claude/docs/SPRINTS.md) for the per-task done log.
+**Sprints 0–6 shipped. v1.0 candidate on Blender 5.1.2.** Addon (41 handler modules, 212 routes), TS server (20 tool files, ~216 MCP tools), full integration suite — **211 cases passing** on real Blender 5.1.2 (Steam install, port 9877 coexisting with ahujasid `blender-mcp` on 9876). Install harness reworked to clone-and-zip (no npm publish): one prompt clones the repo into `.mcp/blender-agent/`, builds the TS server, packages the addon, and injects a passive Blender context skill into your harness. See [.claude/docs/SPRINTS.md](.claude/docs/SPRINTS.md) for the per-task done log.
 
 ---
 
-## Quick start
+## Quick start (manual — for contributors)
 
 ```powershell
 git clone https://github.com/PoBruno/mcp-blender-agent.git
@@ -72,7 +115,9 @@ npm run build
 npm test
 ```
 
-End-user install playbook: [install/INSTALL.md](install/INSTALL.md). Agent-driven install: [install/AGENT-INSTALL.md](install/AGENT-INSTALL.md). Copy-paste prompts: [install/PROMPT-TEMPLATES.md](install/PROMPT-TEMPLATES.md).
+End users: use the one-prompt install above — it's the same flow, just driven by your agent.
+
+End-user install reference: [install/INSTALL.md](install/INSTALL.md). Agent-driven install playbook: [install/AGENT-INSTALL.md](install/AGENT-INSTALL.md). Copy-paste prompts: [install/PROMPT-TEMPLATES.md](install/PROMPT-TEMPLATES.md).
 
 ---
 

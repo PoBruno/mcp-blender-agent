@@ -223,35 +223,39 @@ Headless Blender requirement: `blender` on `PATH` or `BLENDER_BIN` env var point
 
 ---
 
-## Claude Code config (after Phase 0)
+## Claude Code config (after install)
+
+The install harness clones the repo into `<workspace>/.mcp/blender-agent/` and writes:
 
 ```json
 {
   "mcpServers": {
     "blender-agent": {
       "command": "node",
-      "args": ["./node_modules/@pobruno/blender-agent/dist/index.js"],
+      "args": [".mcp/blender-agent/Tools/dist/index.js"],
       "env": { "BLENDER_PORT": "9877" }
     }
   }
 }
 ```
 
-## GitHub Copilot / VS Code config (after Phase 0)
+## GitHub Copilot / VS Code config (after install)
+
+Written to `.vscode/mcp.json`:
 
 ```json
 {
-  "mcp": {
-    "servers": {
-      "blender-agent": {
-        "command": "node",
-        "args": ["./node_modules/@pobruno/blender-agent/dist/index.js"],
-        "env": { "BLENDER_PORT": "9877" }
-      }
+  "servers": {
+    "blender-agent": {
+      "command": "node",
+      "args": [".mcp/blender-agent/Tools/dist/index.js"],
+      "env": { "BLENDER_PORT": "9877" }
     }
   }
 }
 ```
+
+See [install/AGENT-INSTALL.md](install/AGENT-INSTALL.md) for the full clone-and-zip install flow.
 
 ---
 
