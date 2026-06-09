@@ -157,7 +157,8 @@ Source: live agent runs (chair + lowpoly character + 3 animations) surfaced real
 - [ ] **S6-17** Batch/transaction endpoint — run N ops atomically to cut round-trips on multi-part builds
 
 ### Test coverage gaps
-- [ ] **S6-18** Tests for: shader/geo `value` types (float/color/vector incl. stringified), `keyframe_bone_pose` euler-vs-quaternion default, operator mode-guard paths
+- [x] **S6-18** Tests for: shader/geo `value` types (float/color/vector incl. stringified), `keyframe_bone_pose` euler-vs-quaternion default, operator mode-guard paths <!-- done: 2026-06-09 -->
+  → covered by `Tools/test/tools/value-coercion.test.ts` (11 cases across shader_node, light, modifier, keyframe_bone_pose)
 
 ---
 
