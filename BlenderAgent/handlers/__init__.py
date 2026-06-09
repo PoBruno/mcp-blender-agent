@@ -49,3 +49,8 @@ from . import import_ops  # noqa: F401
 
 # Sprint 5 — exec_python (env-flagged)
 from . import exec_python  # noqa: F401
+
+# Sprint 6 — AAA pipeline: vision feedback, post-processing, parametric library
+from . import vision  # noqa: F401
+from . import postproc  # noqa: F401
+from . import parametric  # noqa: F401

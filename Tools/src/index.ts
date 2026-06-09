@@ -63,6 +63,9 @@ import {
   registerImportTools,
 } from "./tools/export.js";
 import { registerExecTools } from "./tools/exec.js";
+import { registerVisionTools } from "./tools/vision.js";
+import { registerPostprocTools } from "./tools/postproc.js";
+import { registerParametricTools } from "./tools/parametric.js";
 
 export function buildServer(): McpServer {
   const server = new McpServer({
@@ -118,6 +121,11 @@ export function buildServer(): McpServer {
 
   // Sprint 5
   registerExecTools(server);
+
+  // Sprint 6 — AAA pipeline (vision feedback, post-processing, parametric library)
+  registerVisionTools(server);
+  registerPostprocTools(server);
+  registerParametricTools(server);
 
   return server;
 }
