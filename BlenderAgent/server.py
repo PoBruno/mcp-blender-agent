@@ -322,6 +322,86 @@ def _server_shutdown(_body: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "data": {"shuttingDown": True}}
 
 
+@handler("POST", "/server/addon_restart")
+def _server_addon_restart(body: dict[str, Any]) -> dict[str, Any]:
+    """Disable + re-enable the BlenderAgent addon in the running Blender.
+
+    Scheduled via `bpy.app.timers.register` with a small delay so the HTTP
+    response is sent BEFORE the server gets torn down. The re-enable then
+    spins a fresh server on the same port. Use this to fully re-register
+    bl_info-level state (handler classes, operators, properties) — heavier
+    than `/server/reload` which only re-imports handler submodules.
+
+    Body: { delay?: float (default 0.5) }
+    Returns: { restarting, addonModule, delay }
+    """
+    import bpy  # type: ignore
+
+    delay = float(body.get("delay", 0.5))
+    if delay < 0.1:
+        delay = 0.1
+    module_name = __package__ or "BlenderAgent"
+
+    def _do_restart() -> None:
+        try:
+            bpy.ops.preferences.addon_disable(module=module_name)
+        except Exception:  # noqa: BLE001
+            logger.exception("addon_disable failed")
+        try:
+            bpy.ops.preferences.addon_enable(module=module_name)
+        except Exception:  # noqa: BLE001
+            logger.exception("addon_enable failed")
+        return None  # do not repeat
+
+    bpy.app.timers.register(_do_restart, first_interval=delay)
+
+    return {
+        "ok": True,
+        "data": {
+            "restarting": True,
+            "addonModule": module_name,
+            "delay": delay,
+        },
+    }
+
+
+@handler("POST", "/server/blender_quit")
+def _server_blender_quit(body: dict[str, Any]) -> dict[str, Any]:
+    """Quit the host Blender process from inside the addon.
+
+    Scheduled via timer so the HTTP response is sent first. After the call
+    Blender exits — the orchestrator must re-spawn it externally
+    (e.g. PowerShell Start-Process) to recover.
+
+    Body: { delay?: float (default 0.5), saveAs?: str (optional .blend path) }
+    Returns: { quitting, delay, saveAs }
+    """
+    import bpy  # type: ignore
+
+    delay = float(body.get("delay", 0.5))
+    if delay < 0.1:
+        delay = 0.1
+    save_as = body.get("saveAs")
+
+    def _do_quit() -> None:
+        try:
+            if save_as:
+                bpy.ops.wm.save_as_mainfile(filepath=str(save_as))
+        except Exception:  # noqa: BLE001
+            logger.exception("save_as_mainfile failed")
+        try:
+            bpy.ops.wm.quit_blender()
+        except Exception:  # noqa: BLE001
+            logger.exception("quit_blender failed")
+        return None
+
+    bpy.app.timers.register(_do_quit, first_interval=delay)
+    return {
+        "ok": True,
+        "data": {"quitting": True, "delay": delay, "saveAs": save_as},
+    }
+
+
 @handler("GET", "/server/handlers")
 def _server_handlers(_body: dict[str, Any]) -> dict[str, Any]:
     return {
