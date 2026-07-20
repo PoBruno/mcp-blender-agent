@@ -61,16 +61,20 @@ If you cannot resolve a workspace and the user isn't on Claude Desktop, **stop a
 
 ### 1.2 — Harness type
 
-Look for these markers (read, never write):
+**First: identify which harness YOU are.** You already know this — you are Claude Code, Copilot agent mode, Cursor, Codex, opencode, or Claude Desktop. That's the default primary harness. Say it out loud in your Phase 3 summary ("I'm running as `<harness>` so I'll configure that one").
+
+Then look for these workspace markers to find *other* harnesses the user also has (read, never write):
 
 | Harness | Markers |
 |---|---|
 | **Claude Code** | `.claude/` directory and/or `CLAUDE.md` at project root, `.mcp.json` |
 | **GitHub Copilot** | `.github/copilot-instructions.md`, `.github/instructions/*.instructions.md`, `.vscode/mcp.json`, `.vscode/settings.json` with `mcp` key |
 | **Cursor** | `AGENTS.md`, `.cursor/`, `.cursor/rules/` |
+| **Codex** | `AGENTS.md`, `~/.codex/config.toml` (global) |
+| **opencode** | `AGENTS.md`, `opencode.json` at workspace root, `~/.config/opencode/opencode.json` (global) |
 | **Claude Desktop** | none in-workspace — flag as a candidate; ask the user |
 
-A workspace may have several. **Record all that are present** — the user might use more than one.
+A workspace may have several. **Record all that are present** — the user might use more than one. If you can't tell which harness you are and no markers exist, **ask** — don't guess.
 
 ### 1.3 — Existing MCP servers
 
@@ -151,13 +155,15 @@ Derive the proposal from the detected picture. Don't ask anything yet.
 
 ### 2.1 — Pick a primary harness
 
-If multiple harnesses were detected, default order: **Claude Code → Copilot → Cursor → Claude Desktop**. If only one, that's the primary. The user will confirm in Phase 3.
+**The harness you are running as is the primary.** If that's ambiguous and multiple were detected, default order: **Claude Code → Copilot → Cursor → Codex → opencode → Claude Desktop**. If only one, that's the primary. The user will confirm in Phase 3.
 
 ### 2.2 — Decide MCP config target
 
 - Claude Code → `.mcp.json` at workspace root (`mcpServers.blender-agent`).
 - Copilot → `.vscode/mcp.json` (`servers.blender-agent`).
 - Cursor → `.mcp.json` like Claude Code.
+- Codex → `~/.codex/config.toml` (`[mcp_servers.blender-agent]` TOML table; create the file if absent). **Global — always ask** before writing.
+- opencode → `opencode.json` at workspace root (`mcp.blender-agent` with `"type": "local"`); fall back to the global `~/.config/opencode/opencode.json` only if the user asks.
 - Claude Desktop → `%APPDATA%\Claude\claude_desktop_config.json` (Windows) / `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS). **Always ask** before touching this one (global).
 
 The command is **always** `npx -y @pobruno/blender-agent@latest` — no per-workspace clone, no build.
@@ -168,7 +174,7 @@ The command is **always** `npx -y @pobruno/blender-agent@latest` — no per-work
 |---|---|---|
 | Claude Code | `.claude/skills/blender-agent/{SKILL,FLOWS,TOOLS}.md` | `CLAUDE.md` |
 | Copilot | `.github/instructions/blender-agent.instructions.md` + `.github/instructions/blender-agent/{FLOWS,TOOLS}.md` | `.github/copilot-instructions.md` |
-| Cursor / generic | `blender-agent/{SKILL,FLOWS,TOOLS}.md` at workspace root | `AGENTS.md` |
+| Cursor / Codex / opencode / generic | `blender-agent/{SKILL,FLOWS,TOOLS}.md` at workspace root | `AGENTS.md` |
 
 If a primary instruction file doesn't exist, the plan **creates a minimal one** whose body is the managed block (so the skill is reachable). The user will confirm.
 
@@ -245,6 +251,28 @@ Per primary harness (and any extra approved in Phase 3). The command is `npx`, n
 
 **Cursor — same as Claude Code (`.mcp.json` at workspace root).**
 
+**Codex — `~/.codex/config.toml`** (global; create if absent, ask first):
+```toml
+[mcp_servers.blender-agent]
+command = "npx"
+args = ["-y", "@pobruno/blender-agent@latest"]
+env = { BLENDER_PORT = "9877" }
+```
+
+**opencode — `opencode.json` (workspace root):**
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "blender-agent": {
+      "type": "local",
+      "command": ["npx", "-y", "@pobruno/blender-agent@latest"],
+      "environment": { "BLENDER_PORT": "9877" }
+    }
+  }
+}
+```
+
 **Claude Desktop** — `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
 
 ```json
@@ -303,7 +331,7 @@ From the `--print-skill-dir` output above (e.g. `C:\Users\me\AppData\Local\npm-c
 - `<skill-dir>/FLOWS.md` → `.github/instructions/blender-agent/FLOWS.md`
 - `<skill-dir>/TOOLS.md` → `.github/instructions/blender-agent/TOOLS.md`
 
-**Cursor / generic:**
+**Cursor / Codex / opencode / generic:**
 - `<skill-dir>/SKILL.md`, `FLOWS.md`, `TOOLS.md` → `blender-agent/` at workspace root
 
 Files are copied **as-is**. Don't edit them — they're the canonical source.
@@ -353,6 +381,8 @@ Once the user confirms the addon is enabled, say:
 > - **Claude Code:** close and re-open the session.
 > - **VS Code (Copilot):** **Developer: Reload Window** (Ctrl+Shift+P).
 > - **Cursor:** **Developer: Reload Window**.
+> - **Codex:** start a new session (`codex` reads config.toml at startup).
+> - **opencode:** start a new session.
 > - **Claude Desktop:** quit and re-open the app.
 >
 > The first call will be slower while `npx` fetches `@pobruno/blender-agent` into the npx cache. Subsequent calls are instant. Tell me when it's restarted — I'll run the health check.
@@ -414,7 +444,7 @@ Remove-Item -Recurse -Force "$workspace/.claude/skills/blender-agent" -ErrorActi
 # Copilot
 Remove-Item -Force "$workspace/.github/instructions/blender-agent.instructions.md" -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force "$workspace/.github/instructions/blender-agent" -ErrorAction SilentlyContinue
-# Cursor / generic
+# Cursor / Codex / opencode / generic
 Remove-Item -Recurse -Force "$workspace/blender-agent" -ErrorAction SilentlyContinue
 ```
 
