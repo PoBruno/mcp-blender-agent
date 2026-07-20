@@ -1,4 +1,14 @@
+<div align="center">
+
 # mcp-blender-agent
+
+**Deterministic Blender control for AI agents — typed tools, not improvised Python.**
+
+[![npm](https://img.shields.io/npm/v/@pobruno/blender-agent)](https://www.npmjs.com/package/@pobruno/blender-agent)
+[![Blender 4.2+](https://img.shields.io/badge/Blender-4.2%20LTS%2B-orange)](https://www.blender.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+</div>
 
 The point nobody discusses in Blender MCP demos: the problem isn't the AI. Most MCPs just delegate Python scripts to Blender — each run generates different code, no grouped undo, no output schema. When it fails you don't know if it was the model, the script, or the scene state.
 
@@ -12,74 +22,24 @@ You solve this outside the addon. Each operation becomes a **typed tool**: input
 
 ## Install
 
-Just run the prompt for your agent in chat. **No clone, no build** — the server runs via `npx`. The agent will print the path to `BlenderAgent.zip`; you install it once via **Blender → Edit → Preferences → Add-ons → Install…** (prereq: Node 18+).
+You install the MCP by running **one prompt in whatever agent you use** — Claude Code, GitHub Copilot, Cursor, Codex, opencode, Claude Desktop. The agent detects which harness it's running in, configures itself, and walks you through the one manual step (installing `BlenderAgent.zip` in Blender's Add-ons UI). **No clone, no build** — the server runs via `npx` (prereq: Node 18+).
 
-### Claude Code
+Paste this into your agent chat:
 
 ```
-Install @pobruno/blender-agent into this workspace. Read install/AGENT-INSTALL.md
-from https://github.com/PoBruno/mcp-blender-agent and run every phase. Merge
-{ "command": "npx", "args": ["-y", "@pobruno/blender-agent@latest"] } into
-.mcp.json, then run `npx -y @pobruno/blender-agent --print-skill-dir` and copy
-the bundled SKILL/FLOWS/TOOLS markdown into .claude/skills/blender-agent/.
-Inject the managed block from MANAGED-BLOCK.md into CLAUDE.md. Use
-AskUserQuestion before anything destructive. Print the path from
+Install @pobruno/blender-agent into this workspace. Fetch and read
+https://raw.githubusercontent.com/PoBruno/mcp-blender-agent/main/install/AGENT-INSTALL.md
+and run every phase. Detect which agent harness you are running as (Claude Code,
+GitHub Copilot, Cursor, Codex, opencode, or Claude Desktop) and follow the
+config-target and skill-placement tables for that harness: merge the
+`npx -y @pobruno/blender-agent@latest` server entry into my MCP config, copy the
+bundled context skill (`npx -y @pobruno/blender-agent --print-skill-dir`) into my
+harness, and inject the managed block from MANAGED-BLOCK.md into my primary
+instruction file. Ask before anything destructive or global. Print the path from
 `--print-addon-zip` so I can install it in Blender's Add-ons UI.
 ```
 
-### GitHub Copilot (VS Code)
-
-```
-Install @pobruno/blender-agent into this workspace. Read install/AGENT-INSTALL.md
-from https://github.com/PoBruno/mcp-blender-agent and run every phase. Merge
-{ "command": "npx", "args": ["-y", "@pobruno/blender-agent@latest"] } into
-.vscode/mcp.json, then run `npx -y @pobruno/blender-agent --print-skill-dir`
-and copy the bundled instructions.md to .github/instructions/blender-agent.instructions.md
-plus FLOWS/TOOLS to .github/instructions/blender-agent/. Inject the managed
-block from MANAGED-BLOCK.md into .github/copilot-instructions.md. Use
-AskUserQuestion before anything destructive. Print the path from
-`--print-addon-zip` so I can install it in Blender's Add-ons UI.
-```
-
-### Cursor
-
-```
-Install @pobruno/blender-agent into this workspace. Read install/AGENT-INSTALL.md
-from https://github.com/PoBruno/mcp-blender-agent and run every phase. Merge
-{ "command": "npx", "args": ["-y", "@pobruno/blender-agent@latest"] } into
-.mcp.json, then run `npx -y @pobruno/blender-agent --print-skill-dir` and copy
-the bundled SKILL/FLOWS/TOOLS markdown into ./blender-agent/. Inject the
-managed block from MANAGED-BLOCK.md into AGENTS.md. Ask before anything
-destructive. Print the path from `--print-addon-zip` so I can install it in
-Blender's Add-ons UI.
-```
-
-### Codex
-
-```
-Install @pobruno/blender-agent into this workspace. Read install/AGENT-INSTALL.md
-from https://github.com/PoBruno/mcp-blender-agent and run every phase. Add
-{ "command": "npx", "args": ["-y", "@pobruno/blender-agent@latest"] } to the
-mcpServers block in ~/.codex/config.toml (create it if absent), then run
-`npx -y @pobruno/blender-agent --print-skill-dir` and copy the bundled
-SKILL/FLOWS/TOOLS markdown into ./blender-agent/. Inject the managed block
-from MANAGED-BLOCK.md into AGENTS.md. Ask before anything destructive. Print
-the path from `--print-addon-zip` so I can install it in Blender's Add-ons UI.
-```
-
-### Claude Desktop
-
-```
-Install @pobruno/blender-agent for me. Read install/AGENT-INSTALL.md from
-https://github.com/PoBruno/mcp-blender-agent and run every phase. Merge
-{ "command": "npx", "args": ["-y", "@pobruno/blender-agent@latest"] } into
-%APPDATA%\Claude\claude_desktop_config.json. Tell me when I need to restart
-Claude Desktop. Ask before anything destructive. Print the path from
-`npx -y @pobruno/blender-agent --print-addon-zip` so I can install it in
-Blender's Add-ons UI.
-```
-
-More prompts (smoke test, workflow recipes): [install/PROMPT-TEMPLATES.md](install/PROMPT-TEMPLATES.md)
+Per-harness prompts and workflow recipes: [install/PROMPT-TEMPLATES.md](install/PROMPT-TEMPLATES.md) · Manual reference: [install/INSTALL.md](install/INSTALL.md)
 
 ---
 

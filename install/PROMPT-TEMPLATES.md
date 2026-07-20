@@ -4,9 +4,28 @@ Copy any of these into your agent chat to kick off a common workflow.
 
 ---
 
-## 1. Install (per harness)
+## 1. Install
 
-Open your project in your IDE, then paste the matching prompt into your agent. The installer is the same — it lives at [install/AGENT-INSTALL.md](AGENT-INSTALL.md). The only thing that changes is the entry phrasing so each harness knows where to write config.
+### Universal (any harness — recommended)
+
+The agent detects which harness it's running in and configures itself. This is the same prompt as the README.
+
+```
+Install @pobruno/blender-agent into this workspace. Fetch and read
+https://raw.githubusercontent.com/PoBruno/mcp-blender-agent/main/install/AGENT-INSTALL.md
+and run every phase. Detect which agent harness you are running as (Claude Code,
+GitHub Copilot, Cursor, Codex, opencode, or Claude Desktop) and follow the
+config-target and skill-placement tables for that harness: merge the
+`npx -y @pobruno/blender-agent@latest` server entry into my MCP config, copy the
+bundled context skill (`npx -y @pobruno/blender-agent --print-skill-dir`) into my
+harness, and inject the managed block from MANAGED-BLOCK.md into my primary
+instruction file. Ask before anything destructive or global. Print the path from
+`--print-addon-zip` so I can install it in Blender's Add-ons UI.
+```
+
+### Per-harness (fallback)
+
+Use these if the universal prompt mis-detects your harness. The installer is the same — it lives at [install/AGENT-INSTALL.md](AGENT-INSTALL.md). The only thing that changes is the entry phrasing so each harness knows where to write config.
 
 ### Claude Code
 
@@ -55,6 +74,20 @@ Install @pobruno/blender-agent into this workspace. Read install/AGENT-INSTALL.m
 from https://github.com/PoBruno/mcp-blender-agent and run every phase. Add
 { "command": "npx", "args": ["-y", "@pobruno/blender-agent@latest"] } to the
 mcpServers block in ~/.codex/config.toml (create it if absent), then run
+`npx -y @pobruno/blender-agent --print-skill-dir` and copy the bundled
+SKILL/FLOWS/TOOLS markdown into ./blender-agent/. Inject the managed block
+from MANAGED-BLOCK.md into AGENTS.md. Ask before anything destructive. Print
+the path from `--print-addon-zip` so I can install it in Blender's Add-ons UI.
+```
+
+### opencode
+
+```
+Install @pobruno/blender-agent into this workspace. Read install/AGENT-INSTALL.md
+from https://github.com/PoBruno/mcp-blender-agent and run every phase. Add
+blender-agent as a local MCP server ({ "type": "local", "command": ["npx", "-y",
+"@pobruno/blender-agent@latest"] }) to the mcp block in opencode.json at the
+workspace root (create it if absent), then run
 `npx -y @pobruno/blender-agent --print-skill-dir` and copy the bundled
 SKILL/FLOWS/TOOLS markdown into ./blender-agent/. Inject the managed block
 from MANAGED-BLOCK.md into AGENTS.md. Ask before anything destructive. Print
