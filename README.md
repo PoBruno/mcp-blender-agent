@@ -2,7 +2,7 @@
 
 # mcp-blender-agent
 
-**Deterministic Blender control for AI agents — typed tools, not improvised Python.**
+**Deterministic Blender control for AI agents, typed tools, not improvised Python.**
 
 [![npm](https://img.shields.io/npm/v/@pobruno/blender-agent)](https://www.npmjs.com/package/@pobruno/blender-agent)
 [![Blender 4.2+](https://img.shields.io/badge/Blender-4.2%20LTS%2B-orange)](https://www.blender.org/)
@@ -10,11 +10,11 @@
 
 </div>
 
-The point nobody discusses in Blender MCP demos: the problem isn't the AI. Most MCPs just delegate Python scripts to Blender — each run generates different code, no grouped undo, no output schema. When it fails you don't know if it was the model, the script, or the scene state.
+The point nobody discusses in Blender MCP demos: the problem isn't the AI. Most MCPs just delegate Python scripts to Blender, each run generates different code, no grouped undo, no output schema. When it fails you don't know if it was the model, the script, or the scene state.
 
 You solve this outside the addon. Each operation becomes a **typed tool**: input validated, output structured as `{ ok, data, refs, nextSteps }` with IDs that chain into the next call. Composite mutations end with a single undo push. The agent stops improvising Python. Same input, same result. Ctrl+Z undoes the entire operation.
 
-~216 tools across 12 domains — a separate tool for each Blender operation: modeling, rigging, animation, materials, shader/geometry nodes, rendering, FBX/glTF/USD/Alembic export with every exporter parameter exposed. Runs on Blender 4.2 LTS+ (5.x recommended).
+~216 tools across 12 domains, a separate tool for each Blender operation: modeling, rigging, animation, materials, shader/geometry nodes, rendering, FBX/glTF/USD/Alembic export with every exporter parameter exposed. Runs on Blender 4.2 LTS+ (5.x recommended).
 
 → Architecture: [.claude/docs/ARCHITECTURE.md](.claude/docs/ARCHITECTURE.md)
 
@@ -22,7 +22,7 @@ You solve this outside the addon. Each operation becomes a **typed tool**: input
 
 ## Install
 
-You install the MCP by running **one prompt in whatever agent you use** — Claude Code, GitHub Copilot, Cursor, Codex, opencode, Claude Desktop. The agent detects which harness it's running in, configures itself, and walks you through the one manual step (installing `BlenderAgent.zip` in Blender's Add-ons UI). **No clone, no build** — the server runs via `npx` (prereq: Node 18+).
+You install the MCP by running **one prompt in whatever agent you use**, Claude Code, GitHub Copilot, Cursor, Codex, opencode, Claude Desktop. The agent detects which harness it's running in, configures itself, and walks you through the one manual step (installing `BlenderAgent.zip` in Blender's Add-ons UI). **No clone, no build**, the server runs via `npx` (prereq: Node 18+).
 
 Paste this into your agent chat:
 
