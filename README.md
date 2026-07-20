@@ -1,18 +1,18 @@
 # mcp-blender-agent
 
-The problem with most Blender MCPs: they just delegate Python scripts. Each run generates different code, no grouped undo, no output schema — when it fails you don't know if it was the model, the script, or the scene state.
+The point nobody discusses in Blender MCP demos: the problem isn't the AI. Most MCPs just delegate Python scripts to Blender — each run generates different code, no grouped undo, no output schema. When it fails you don't know if it was the model, the script, or the scene state.
 
-Here every operation is a **typed tool**: input validated by Zod schema, output structured as `{ ok, data, refs, nextSteps }` with IDs that chain into the next call. Composite mutations end with a single undo push. Same input, same result. Ctrl+Z undoes the whole operation, not five micro-steps.
+You solve this outside the addon. Each operation becomes a **typed tool**: input validated, output structured as `{ ok, data, refs, nextSteps }` with IDs that chain into the next call. Composite mutations end with a single undo push. The agent stops improvising Python. Same input, same result. Ctrl+Z undoes the entire operation.
 
-~216 tools across 12 domains — modeling, rigging, animation, materials, shader/geometry nodes, rendering, FBX/glTF/USD/Alembic export with every exporter parameter exposed. Runs on Blender 4.2 LTS+ (5.x recommended).
+~216 tools across 12 domains — a separate tool for each Blender operation: modeling, rigging, animation, materials, shader/geometry nodes, rendering, FBX/glTF/USD/Alembic export with every exporter parameter exposed. Runs on Blender 4.2 LTS+ (5.x recommended).
 
-→ Architecture deep-dive: [.claude/docs/ARCHITECTURE.md](.claude/docs/ARCHITECTURE.md)
+→ Architecture: [.claude/docs/ARCHITECTURE.md](.claude/docs/ARCHITECTURE.md)
 
 ---
 
 ## Install
 
-Paste the prompt for your agent into chat. **No clone, no build** — the server runs via `npx`. The agent will print the path to `BlenderAgent.zip`; you install it once via **Blender → Edit → Preferences → Add-ons → Install…** (prereq: Node 18+).
+Just run the prompt for your agent in chat. **No clone, no build** — the server runs via `npx`. The agent will print the path to `BlenderAgent.zip`; you install it once via **Blender → Edit → Preferences → Add-ons → Install…** (prereq: Node 18+).
 
 ### Claude Code
 
