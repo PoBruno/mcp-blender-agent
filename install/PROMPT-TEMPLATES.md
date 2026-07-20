@@ -48,6 +48,19 @@ destructive. Print the path from `--print-addon-zip` so I can install it in
 Blender's Add-ons UI.
 ```
 
+### Codex
+
+```
+Install @pobruno/blender-agent into this workspace. Read install/AGENT-INSTALL.md
+from https://github.com/PoBruno/mcp-blender-agent and run every phase. Add
+{ "command": "npx", "args": ["-y", "@pobruno/blender-agent@latest"] } to the
+mcpServers block in ~/.codex/config.toml (create it if absent), then run
+`npx -y @pobruno/blender-agent --print-skill-dir` and copy the bundled
+SKILL/FLOWS/TOOLS markdown into ./blender-agent/. Inject the managed block
+from MANAGED-BLOCK.md into AGENTS.md. Ask before anything destructive. Print
+the path from `--print-addon-zip` so I can install it in Blender's Add-ons UI.
+```
+
 ### Claude Desktop
 
 ```
