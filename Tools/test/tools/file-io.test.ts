@@ -31,6 +31,27 @@ describe("file IO — save / open / append (B9.E)", () => {
     expect(open.ok).toBe(true);
   });
 
+  it("appends an Object, links it into the scene and returns its name", async () => {
+    await blenderPost("/file/new", { empty: true });
+    await blenderPost("/object/create", { type: "CUBE", name: "AppendDonor" });
+    const donorPath = join(workDir, "donor.blend");
+    expect((await blenderPost("/file/save_as", { filepath: donorPath })).ok).toBe(true);
+
+    await blenderPost("/file/new", { empty: true });
+    const res = await blenderPost("/file/append_data", {
+      filepath: donorPath,
+      datablockType: "Object",
+      names: ["AppendDonor"],
+    });
+    expect(res.ok).toBe(true);
+    expect(res.data.appended).toEqual(["AppendDonor"]);
+    expect(res.refs.objectNames).toEqual(["AppendDonor"]);
+
+    const list = await blenderPost("/object/list", { namePattern: "AppendDonor" });
+    expect(list.data.count).toBe(1);
+    expect(list.data.objects[0].collections.length).toBeGreaterThan(0);
+  });
+
   it("rejects /file/open on a missing path with INVALID_INPUT", async () => {
     const res = await blenderPost("/file/open", {
       filepath: join(workDir, "does-not-exist.blend"),

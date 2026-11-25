@@ -95,7 +95,9 @@ def file_append_data(body: dict[str, Any]) -> dict[str, Any]:
             available = list(attr_from)
             wanted = [n for n in names if n in available]
             setattr(data_to, datablock_type.lower() + "s", wanted)
-            appended = wanted
+            # Copy: on context exit Blender swaps the names in `wanted` for
+            # the loaded datablocks, which breaks the name check and JSON reply.
+            appended = list(wanted)
 
     # Link appended Objects into the active scene
     if datablock_type.lower() == "object":
